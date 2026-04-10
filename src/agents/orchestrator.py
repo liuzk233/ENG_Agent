@@ -1,6 +1,6 @@
 # 文件路径: src/agents/orchestrator.py
-from .writer import generate_draft
-from .reviewer import check_vocabulary
+from agents.writer import generate_draft
+from agents.reviewer import check_vocabulary
 
 def run_agent_workflow(llm_client, target_words: list, style: str, syllabus_set: set, max_retries: int = 3) -> dict:
     """
@@ -22,7 +22,7 @@ def run_agent_workflow(llm_client, target_words: list, style: str, syllabus_set:
         draft = generate_draft(llm_client, target_words, style, feedback)
         
         # 2. 质检阶段 (Critic)
-        passed, new_feedback = check_vocabulary(draft, syllabus_set, target_words)
+        passed, new_feedback = check_vocabulary(draft, syllabus_set, target_words, llm_client=llm_client)
         
         if passed:
             print("✅ 审核通过！文章生成完毕。")

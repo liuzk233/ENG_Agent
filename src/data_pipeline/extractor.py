@@ -1,27 +1,31 @@
 # 文件路径: src/data_pipeline/extractor.py
 import pandas as pd
 
+# 文件路径: src/data_pipeline/extractor.py
+import pandas as pd
+
+# 文件路径: src/data_pipeline/extractor.py
+import pandas as pd
+
 def load_syllabus_xls(file_path: str) -> set:
     """
-    读取考研大纲 Excel 文件，并将其转化为一个 Set (集合)。
-    
-    为什么要用 Set？
-    因为后续我们需要成千上万次地检查 "某个单词是否在大纲里"。
-    在 Python 中，List 的查找速度是 O(n)（很慢），而 Set 的查找速度是 O(1)（瞬间完成）。
+    精简版：读取大纲并处理特殊符号 (/, -, \xa0)
     """
-    print(f"📦 正在加载词汇大纲: {file_path}")
     try:
-        # header=None 表示第一行就是数据，没有表头
-        # usecols=[0] 表示只读取第一列 (第0列)
         df = pd.read_excel(file_path, header=None, usecols=[0])
+        syllabus_set = set()
         
-        # 提取第一列的数据转化为列表，过滤掉空值，统一转为小写
-        words_list = df[0].dropna().astype(str).tolist()
-        syllabus_set = {word.strip().lower() for word in words_list if word.strip()}
-        
-        print(f"✅ 成功加载大纲，共包含 {len(syllabus_set)} 个单词。\n")
+        # 遍历第一列去重、去空后的数据
+        for item in df[0].dropna().astype(str):
+            # 1. 转小写，去除两端空白，并将 \xa0 (不间断空格) 替换为普通空格
+            clean_item = item.strip().lower().replace('\xa0', ' ')
+            
+            # 2. 针对 / 进行切割 (如 'a/an' 会被切分为 ['a', 'an'])
+            # 带有 - 的单词 (如 'grown-up') 因为没有 /，会被当作整体直接放入
+            syllabus_set.update(word.strip() for word in clean_item.split('/') if word.strip())
+            
         return syllabus_set
-    
+        
     except Exception as e:
         print(f"❌ 加载大纲失败: {e}")
         return set()
