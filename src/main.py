@@ -20,7 +20,7 @@ def main():
 
     # 2. 加载完整的词汇大纲 (给质检员 Reviewer 用的标尺)
     # 替换为你自己电脑上实际的 .xls 路径
-    syllabus_path = "/root/rivermind-data/Eng_Agent/data/raw/outline_vocabulary/01.考研英语词汇正序版.xls"
+    syllabus_path = r"D:\3_下载与相关数据\xwechat_files\wxid_31zdo0xdsmio22_fcd0\msg\file\2026-04\01.考研英语词汇正序版.xls"
     if not os.path.exists(syllabus_path):
         print(f"🚨 找不到大纲文件: {syllabus_path}")
         return

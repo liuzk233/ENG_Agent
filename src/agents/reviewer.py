@@ -5,7 +5,7 @@ from lemminflect import getLemma
 from snowballstemmer import stemmer
 
 # 引入集中管理的 Prompt 模板
-from prompts.templates import REVIEWER_SYSTEM_PROMPT, get_smart_filter_prompt
+from src.prompts.templates import REVIEWER_SYSTEM_PROMPT, get_smart_filter_prompt
 
 nlp = spacy.load("en_core_web_sm")
 en_stemmer = stemmer("english")

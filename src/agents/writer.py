@@ -1,7 +1,7 @@
 # 文件路径: src/agents/writer.py
 
 # 引入我们在 prompts/templates.py 中定义好的模板
-from prompts.templates import (
+from src.prompts.templates import (
     WRITER_SYSTEM_PROMPT,
     get_drafting_prompt,
     get_refining_prompt

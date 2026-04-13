@@ -1,6 +1,6 @@
 # 文件路径: src/agents/orchestrator.py
-from agents.writer import generate_draft
-from agents.reviewer import check_vocabulary
+from src.agents.writer import generate_draft
+from src.agents.reviewer import check_vocabulary
 
 def run_agent_workflow(llm_client, target_words: list, style: str, syllabus_set: set, max_retries: int = 3) -> dict:
     """
