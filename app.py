@@ -5,7 +5,7 @@ import os
 # 导入我们之前写好的核心后端逻辑
 from src.utils.llm_client import LLMClient
 from src.agents.orchestrator import run_agent_workflow
-from src.data_pipeline.extractor import load_syllabus_xls
+from ENG_Agent.src.data_pipeline.parsers.extractor import load_syllabus_xls
 
 # ==========================================
 # 1. 页面基础设置 (必须写在最前面)

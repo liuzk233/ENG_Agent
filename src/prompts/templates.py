@@ -1,8 +1,16 @@
 # 文件路径: src/prompts/templates.py
+"""
+提示词模板统一管理中心
 
-# ==========================================
-# Writer Agent 提示词模板
-# ==========================================
+本模块集中管理所有 LLM 提示词，便于：
+1. 版本控制与 A/B 测试
+2. 快速迭代优化
+3. 保持代码与提示词解耦
+"""
+
+# ============================================================
+# Writer Agent 提示词
+# ============================================================
 
 WRITER_SYSTEM_PROMPT = """
 你是一个极其专业的英语教育专家，擅长编写特定风格的英语短文。
@@ -12,16 +20,66 @@ WRITER_SYSTEM_PROMPT = """
 3. 遇到需要表达复杂概念时，请使用基础词汇进行解释说明（paraphrase）。
 """
 
-def get_drafting_prompt(style: str, words_str: str) -> str:
-    """生成初稿的用户提示词"""
-    return (
-        f"请用【{style}】风格写一篇英语短文（约 150-200 词）。\n"
+# Few-Shot 黄金范文：融入常见的倒装句、强调句、从句等考场高分句式
+FEW_SHOT_EXAMPLES = """
+【优质范例学习】
+在正式创作前，请仔细体会以下两篇满分范文的句式结构与用词深度：
+
+范例 1 (风格: 议论文 Argumentative)：
+"It is universally acknowledged that technology plays an increasingly significant role in our daily lives. Not only does it bring convenience, but it also broadens our horizons. However, every coin has two sides. Only by utilizing it reasonably can we truly benefit from it."
+
+范例 2 (风格: 科幻 Sci-Fi)：
+"In the distant future, humanity's desire to explore the uncharted galaxy became unprecedentedly intense. Little did they know that the spaceship they built would face such immense danger. Suddenly, a mysterious light flashed outside the window."
+-------------------------------------------
+"""
+
+
+def get_drafting_prompt(style: str, words_str: str, reference_texts: list = None) -> str:
+    """
+    生成初稿的用户提示词（融合 Few-Shot 与 RAG 参考语料）
+
+    Args:
+        style: 目标风格（如 "exam_paper", "科幻"）
+        words_str: 目标单词字符串（逗号分隔）
+        reference_texts: RAG 检索到的参考语料列表
+
+    Returns:
+        str: 完整的用户提示词
+    """
+    prompt = FEW_SHOT_EXAMPLES
+
+    # 动态注入 RAG 检索到的参考语料
+    if reference_texts:
+        ref_section = "\n【风格参考语料】\n"
+        ref_section += "以下是目标风格的参考文本，请仔细学习其句式、用词和语调：\n\n"
+
+        for i, text in enumerate(reference_texts[:3], 1):
+            ref_section += f"参考 {i}:\n{text}\n\n"
+
+        ref_section += "⚠️ 重要：你的文章必须模仿以上参考文本的风格特征，但不要直接复制内容！\n"
+        prompt += ref_section
+
+    prompt += (
+        f"【你的任务】\n"
+        f"请用【{style}】风格写一篇英语短文（约 200-300 词）。\n"
         f"文章中必须自然地包含以下单词：[{words_str}]。\n"
-        "请直接输出文章主体，不要包含任何多余的解释、标题或问候语。"
+        f"请直接输出文章主体，不要包含任何多余的解释、标题或问候语。"
     )
+    return prompt
+
 
 def get_refining_prompt(style: str, words_str: str, feedback: str) -> str:
-    """根据质检员反馈进行重写的用户提示词"""
+    """
+    生成重写提示词（包含 Reviewer 的报错反馈）
+
+    Args:
+        style: 目标风格
+        words_str: 目标单词字符串
+        feedback: Reviewer 给出的报错信息
+
+    Returns:
+        str: 完整的重写提示词
+    """
     return (
         f"你之前生成了一篇【{style}】风格的文章，但质检员发现了严重的问题：\n\n"
         f"【质检反馈】：\n{feedback}\n\n"
@@ -32,9 +90,10 @@ def get_refining_prompt(style: str, words_str: str, feedback: str) -> str:
         f"请直接输出修改后的完整文章，不要包含其他废话。"
     )
 
-# ==========================================
-# Reviewer Agent 兜底复核提示词模板
-# ==========================================
+
+# ============================================================
+# Reviewer Agent 提示词
+# ============================================================
 
 REVIEWER_SYSTEM_PROMPT = """
 你是一个精通英语词汇学与中国大陆英语教育体系的 NLP 专家。
@@ -42,8 +101,17 @@ REVIEWER_SYSTEM_PROMPT = """
 请严格输出 JSON 格式数据，绝对不要包含任何其他说明文字或 Markdown 标记。
 """
 
+
 def get_smart_filter_prompt(words_list: list) -> str:
-    """生成 Reviewer 智能复核的提示词"""
+    """
+    生成 LLM 智能过滤提示词（用于判断嫌疑词是否为简单词）
+
+    Args:
+        words_list: 疑似超纲单词列表
+
+    Returns:
+        str: 智能分析提示词
+    """
     return f"""
 请分析以下疑似超纲的英文单词列表：{words_list}
 
@@ -59,3 +127,38 @@ def get_smart_filter_prompt(words_list: list) -> str:
     "extraterrestrial": {{"lemma": "extraterrestrial", "is_simple": false}}
 }}
 """
+
+
+def get_violation_feedback(out_of_syllabus_words: set) -> str:
+    """
+    生成超纲词汇违规反馈（供 Writer 重写时参考）
+
+    Args:
+        out_of_syllabus_words: 超纲词汇集合
+
+    Returns:
+        str: 格式化的反馈字符串
+    """
+    bad_words_str = ", ".join(out_of_syllabus_words)
+    return (
+        f"你的文章中包含了以下 {len(out_of_syllabus_words)} 个大纲外的高级词汇或生僻词：\n"
+        f"[{bad_words_str}]\n"
+        f"请立刻找到并删除这些词，用最基础的词汇重写表达！"
+    )
+
+
+# ============================================================
+# 导出清单（便于外部模块按需导入）
+# ============================================================
+
+__all__ = [
+    # Writer prompts
+    "WRITER_SYSTEM_PROMPT",
+    "FEW_SHOT_EXAMPLES",
+    "get_drafting_prompt",
+    "get_refining_prompt",
+    # Reviewer prompts
+    "REVIEWER_SYSTEM_PROMPT",
+    "get_smart_filter_prompt",
+    "get_violation_feedback",
+]

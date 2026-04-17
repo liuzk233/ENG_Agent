@@ -5,7 +5,11 @@ from lemminflect import getLemma
 from snowballstemmer import stemmer
 
 # 引入集中管理的 Prompt 模板
-from src.prompts.templates import REVIEWER_SYSTEM_PROMPT, get_smart_filter_prompt
+from src.prompts.templates import (
+    REVIEWER_SYSTEM_PROMPT,
+    get_smart_filter_prompt,
+    get_violation_feedback
+)
 
 nlp = spacy.load("en_core_web_sm")
 en_stemmer = stemmer("english")
@@ -124,12 +128,6 @@ def check_vocabulary(text: str, syllabus_set: set, target_words: list, llm_clien
 
     if not out_of_syllabus_words:
         return True, "Perfect! 没有发现超纲词汇。"
-        
-    bad_words_str = ", ".join(out_of_syllabus_words)
-    feedback = (
-        f"你的文章中包含了以下 {len(out_of_syllabus_words)} 个大纲外的高级词汇或生僻词：\n"
-        f"[{bad_words_str}]\n"
-        f"请立刻找到并删除这些词，用最基础的词汇重写表达！"
-    )
-    
+
+    feedback = get_violation_feedback(out_of_syllabus_words)
     return False, feedback

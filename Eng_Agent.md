@@ -31,9 +31,21 @@
 ```text
 VocabWeaver/
 │
-├── data/                    # 本地数据存放区 (建议在 .gitignore 中忽略 raw 数据)
-│   ├── raw/                 # 原始数据：历年真题PDF/TXT，官方词汇大纲原文件
-│   └── processed/           # 处理后的数据：提取出的高频词库(JSON/CSV)，语法结构库
+├── data/
+│    ├── 1_raw/                 # 绝对不可变的原始数据 (Read-Only)
+│    │   ├── syllabus/          # 大纲表 (如 01.考研英语词汇正序版.xls)
+│    │   └── corpus/            # 原始语料 (如 真题.pdf, 三体.epub)
+│    │
+│    ├── 2_processed/           # 清洗和转换后的中间态数据 (可随时被脚本重新生成)
+│    │   ├── dicts/             # 生成的高频词 json、UK-US 映射表
+│    │   └── chunks/            # 灌库前的纯文本切片缓存 (TXT/JSON 格式，方便排查切片问题)
+│    │
+│    ├── 3_vector_store/        # 向量数据库持久化存储
+│    │   └── chromadb/          # 将原本根目录的 ./chroma_data 移到这里
+│    │
+│    └── 4_evaluation/          # 评估与测试数据集
+│        ├── ground_truth/      # 人工标注的黄金测试集 (Golden Dataset)
+│        └── logs/              # 存放 Agent 历次运行的 Bad Case 日志
 │
 ├── src/                     # 核心业务逻辑代码
 │   ├── __init__.py
