@@ -1,10 +1,11 @@
 # 文件路径: src/agents/orchestrator.py
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from .writer import generate_draft
 from .reviewer import check_vocabulary
 from ..utils.rag_retriever import RAGRetriever
+from ..rag.retriever import MilvusRAGRetriever
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class Orchestrator:
     def __init__(
         self,
         llm_client,
-        rag_retriever: Optional[RAGRetriever] = None,
+        rag_retriever: Optional[Union[RAGRetriever, MilvusRAGRetriever]] = None,
         max_retries: int = 3
     ):
         self.llm_client = llm_client

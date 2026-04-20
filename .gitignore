@@ -4,3 +4,4 @@ src/.env
 src/scratch
 test_output.json
 .claude/settings.local.json
+.doc/daily-log

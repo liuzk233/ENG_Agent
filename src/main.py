@@ -7,7 +7,7 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
 from src.utils.llm_client import LLMClient
-from src.utils.rag_retriever import RAGRetriever
+from src.utils.config import VECTOR_STORE_TYPE
 from src.agents.orchestrator import Orchestrator, run_agent_workflow
 from src.data_pipeline.parsers.extractor import load_syllabus_xls
 
@@ -37,16 +37,27 @@ def main():
         print("🚨 大纲加载失败，测试终止。")
         return
 
-    # 3. 初始化 RAG Retriever（新功能）
-    print("2. 正在初始化 RAG 向量检索器...")
+    # 3. 初始化 RAG Retriever（根据配置选择向量数据库）
+    print(f"2. 正在初始化 RAG 向量检索器 ({VECTOR_STORE_TYPE})...")
+    rag_retriever = None
+
     try:
-        rag_retriever = RAGRetriever(
-            collection_name="vocabweaver_rag",
-            persist_dir="data/vector_store/chromadb",
-            top_k=5,
-            relevance_threshold=0.75
-        )
-        print("✅ RAG 检索器初始化成功")
+        if VECTOR_STORE_TYPE == "milvus":
+            from src.rag.retriever import MilvusRAGRetriever
+            rag_retriever = MilvusRAGRetriever(
+                top_k=5,
+                relevance_threshold=0.75,
+                strict_vocabulary=True  # 软过滤：只返回纯净语料
+            )
+        else:
+            from src.utils.rag_retriever import RAGRetriever
+            rag_retriever = RAGRetriever(
+                collection_name="vocabweaver_rag",
+                persist_dir="data/vector_store/chromadb",
+                top_k=5,
+                relevance_threshold=0.75
+            )
+        print(f"✅ RAG 检索器初始化成功 ({VECTOR_STORE_TYPE})")
     except Exception as e:
         print(f"⚠️ RAG 检索器初始化失败: {e}")
         print("将不使用 RAG 功能继续运行...")

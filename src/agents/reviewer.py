@@ -1,4 +1,10 @@
 # 文件路径: src/agents/reviewer.py
+import sys
+
+# 修复 Windows 终端编码问题
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 import spacy
 import json
 from lemminflect import getLemma
