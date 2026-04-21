@@ -1,114 +1,223 @@
-# 文件路径: app.py
+"""
+Streamlit Web UI
+
+使用 LangGraph 流程运行 VocabWeaver。
+"""
+
 import streamlit as st
 import os
+import uuid
+import logging
 
-# 导入我们之前写好的核心后端逻辑
-from src.utils.llm_client import LLMClient
-from src.agents.orchestrator import run_agent_workflow
-from ENG_Agent.src.data_pipeline.parsers.extractor import load_syllabus_xls
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 导入 LangGraph 流程
+from src.graph.graph import compile_graph, run_initialize, run_continue
+from src.data_pipeline.parsers.extractor import load_syllabus_xls
+
 
 # ==========================================
-# 1. 页面基础设置 (必须写在最前面)
+# 页面基础设置
 # ==========================================
+
 st.set_page_config(
     page_title="VocabWeaver 词语编织者",
     page_icon="🪄",
-    layout="wide" # 使用宽屏模式
+    layout="wide"
 )
 
+
 # ==========================================
-# 2. 全局资源缓存 (🚨 资深工程师核心心法)
+# 全局资源缓存
 # ==========================================
-# Streamlit 的运行机制是：用户每次点击按钮，整个 Python 脚本会从头到尾重新运行一次！
-# 如果不加 @st.cache_resource，每次点击都会重新加载一次大模型客户端和几千词的 Excel 大纲，导致极度卡顿。
-# 加了缓存装饰器，这些沉重的初始化操作只会在网页第一次打开时执行一次。
+
 @st.cache_resource
 def init_system():
-    # 初始化 LLM 客户端
-    llm = LLMClient()
-    
-    # 加载大纲 (请确保路径正确，建议使用相对路径)
-    # 根据你之前的结构，大纲应该在项目根目录的 data 文件夹下
-    syllabus_path = "data/raw/outline_vocabulary/01.考研英语词汇正序版.xls"
-    
-    # 如果相对路径找不到，可以使用你之前的绝对路径 fallback
+    """初始化系统资源"""
+    # 编译 Graph
+    compiled_graph = compile_graph()
+
+    # 加载大纲
+    syllabus_path = "data/raw/syllabus/考研英语词汇表.xls"
     if not os.path.exists(syllabus_path):
         syllabus_path = r"D:\3_下载与相关数据\xwechat_files\wxid_31zdo0xdsmio22_fcd0\msg\file\2026-04\01.考研英语词汇正序版.xls"
-        
-    syllabus = load_syllabus_xls(syllabus_path)
-    return llm, syllabus
 
-# 获取缓存好的实例
-llm_client, syllabus_set = init_system()
+    syllabus = set()
+    if os.path.exists(syllabus_path):
+        syllabus = load_syllabus_xls(syllabus_path)
+
+    return compiled_graph, syllabus
+
+
+# 获取缓存实例
+compiled_graph, syllabus_set = init_system()
+
 
 # ==========================================
-# 3. UI 布局与组件 (左侧控制面板)
+# 会话状态管理
 # ==========================================
-# st.sidebar 会自动在网页左侧生成一个漂亮的侧边栏
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None
+if "user_id" not in st.session_state:
+    st.session_state.user_id = f"web_user_{uuid.uuid4().hex[:8]}"
+if "episode_results" not in st.session_state:
+    st.session_state.episode_results = []
+
+
+# ==========================================
+# UI 布局
+# ==========================================
+
+# 侧边栏
 with st.sidebar:
     st.header("⚙️ 生成设置面板")
-    
-    # 下拉选择框
+
+    # 模式选择
+    mode = st.radio(
+        "运行模式",
+        ["新故事 (Initialize)", "续写故事 (Continue)"],
+        index=0
+    )
+
+    # 风格选择
     style = st.selectbox(
-        "📝 请选择文章风格", 
-        ["科幻 (Sci-Fi)", "议论文 (Argumentative)", "童话 (Fairy Tale)", "新闻报道 (News)", "悬疑 (Mystery)"]
+        "📝 请选择文章风格",
+        ["adventure", "scifi", "mystery", "news", "exam_paper"]
     )
-    
-    # 多行文本输入框
+
+    # 集数设置
+    total_episodes = st.number_input(
+        "📚 总集数",
+        min_value=1,
+        max_value=10,
+        value=1
+    )
+
+    # 目标词汇输入
     words_input = st.text_area(
-        "🎯 输入你想记忆的单词 (用逗号分隔)", 
-        value="galaxy, spaceship, explore, suddenly, carefully",
-        height=150
+        "🎯 输入目标单词 (逗号分隔)",
+        value="explore, discover, adventure",
+        height=100
     )
-    
-    # 处理用户输入的单词，去除空格和空字符串
+
     target_words = [w.strip() for w in words_input.split(",") if w.strip()]
 
-# ==========================================
-# 4. UI 布局与组件 (右侧主界面)
-# ==========================================
-st.title("🪄 VocabWeaver 词语编织者")
-st.markdown("输入你想要记忆的单词，AI Agent 将自动为你编织一篇**绝对不含超纲词汇**的专属短文！")
-
-# 画一条分割线
-st.divider() 
-
-# 核心交互逻辑：当用户点击这个按钮时，下方代码才会执行
-if st.button("🚀 召唤 AI 开始编织文章", type="primary"):
-    
-    if not target_words:
-        st.warning("⚠️ 请至少输入一个目标单词！")
-    elif not syllabus_set:
-        st.error("🚨 致命错误：词汇大纲加载失败，请检查文件路径！")
+    # 显示当前会话状态
+    st.divider()
+    st.subheader("📊 会话状态")
+    if st.session_state.session_id:
+        st.info(f"Session: {st.session_state.session_id[:8]}...")
+        st.info(f"已完成: {len(st.session_state.episode_results)} 集")
     else:
-        # 显示一个加载中的动画
-        with st.spinner("🤖 AI Writer 正在挥洒创意，Reviewer 正在严格把关，请稍候..."):
-            
-            # 调用我们在 Phase 2 写好的核心调度器
-            result = run_agent_workflow(
-                llm_client=llm_client,
-                target_words=target_words,
-                style=style.split(" ")[0], # 把 "科幻 (Sci-Fi)" 切成 "科幻" 传给模型
-                syllabus_set=syllabus_set,
-                max_retries=3
-            )
-            
-        # 根据返回的状态更新 UI
-        if result["status"] == "success":
-            # 绿色成功提示框
-            st.success(f"🎉 任务完美完成！(历经 {result['attempts']} 轮修改与审核)")
-            
-            # 使用 Markdown 美化文章展示区域
-            st.markdown("### 📜 你的专属文章")
-            
-            # 使用 info 框包裹文章内容，看起来更像一个阅读面板
-            st.info(result["content"])
-            
-            # 你甚至可以加一个炫酷的庆祝动画
-            st.balloons() 
-            
+        st.warning("未创建会话")
+
+# 主界面
+st.title("🪄 VocabWeaver 词语编织者")
+st.markdown("基于 **LangGraph** 的多智能体英语文章生成系统")
+st.caption("Writer → Reviewer → 循环修正 → 生成不含超纲词的文章")
+
+st.divider()
+
+
+# ==========================================
+# 核心交互逻辑
+# ==========================================
+
+col1, col2 = st.columns([3, 1])
+
+with col1:
+    if st.button("🚀 开始生成", type="primary", use_container_width=True):
+        if not target_words:
+            st.warning("⚠️ 请输入至少一个目标单词！")
         else:
-            # 红色错误提示框
-            st.error(f"❌ 生成失败！已达到最大重试次数。Agent 无法在限制内消除所有超纲词汇。")
-            st.markdown("### 📜 最后一次尝试的文章 (可能包含超纲词):")
-            st.warning(result["content"])
+            # 显示加载动画
+            with st.spinner("🤖 LangGraph 流程运行中..."):
+                try:
+                    if mode == "新故事 (Initialize)" or not st.session_state.session_id:
+                        # Initialize 模式
+                        result = run_initialize(
+                            compiled_graph,
+                            user_id=st.session_state.user_id,
+                            total_episodes=total_episodes,
+                            target_words=target_words,
+                            style=style,
+                        )
+
+                        # 保存会话
+                        st.session_state.session_id = result.get("session_id")
+
+                    else:
+                        # Continue 模式
+                        result = run_continue(
+                            compiled_graph,
+                            user_id=st.session_state.user_id,
+                            session_id=st.session_state.session_id,
+                            target_words=target_words,
+                        )
+
+                    # 保存结果
+                    st.session_state.episode_results.append(result)
+
+                    # 显示结果
+                    st.success(f"🎉 生成完成！")
+                    st.balloons()
+
+                except Exception as e:
+                    st.error(f"❌ 执行失败: {e}")
+                    logger.exception("LangGraph 执行失败")
+
+with col2:
+    if st.button("🔄 重置会话", use_container_width=True):
+        st.session_state.session_id = None
+        st.session_state.episode_results = []
+        st.rerun()
+
+
+# ==========================================
+# 结果展示
+# ==========================================
+
+if st.session_state.episode_results:
+    st.divider()
+    st.header("📜 生成结果")
+
+    # 使用标签页展示各集结果
+    tabs = st.tabs([f"第 {i+1} 集" for i in range(len(st.session_state.episode_results))])
+
+    for i, (tab, result) in enumerate(zip(tabs, st.session_state.episode_results)):
+        with tab:
+            # 状态信息
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("重试次数", result.get("retry_count", 0))
+            with col_b:
+                st.metric("调整次数", result.get("adjust_count", 0))
+            with col_c:
+                fallback = "是" if result.get("fallback_mode") else "否"
+                st.metric("兜底模式", fallback)
+
+            # 超纲词
+            if result.get("out_of_scope_words"):
+                st.warning(f"⚠️ 超纲词: {', '.join(result['out_of_scope_words'])}")
+
+            # 文章内容
+            final_text = result.get("final_text") or result.get("draft_text", "")
+            if final_text:
+                st.markdown("### 📖 文章内容")
+                st.info(final_text)
+
+
+# ==========================================
+# 调试信息
+# ==========================================
+
+with st.expander("🔧 调试信息"):
+    st.json({
+        "user_id": st.session_state.user_id,
+        "session_id": st.session_state.session_id,
+        "episode_count": len(st.session_state.episode_results),
+        "syllabus_loaded": len(syllabus_set) if syllabus_set else 0,
+    })

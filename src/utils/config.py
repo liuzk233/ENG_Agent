@@ -43,3 +43,16 @@ EMBEDDING_BACKEND = os.getenv("EMBEDDING_BACKEND", "dashscope")
 BGE_M3_MODEL_NAME = os.getenv("BGE_M3_MODEL_NAME", "BAAI/bge-m3")
 BGE_M3_USE_FP16 = os.getenv("BGE_M3_USE_FP16", "true").lower() == "true"
 BGE_M3_DEVICE = os.getenv("BGE_M3_DEVICE", "cuda")
+
+# ============================================================
+# PostgreSQL 配置 (Memory Persistence)
+# ============================================================
+
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_USER = os.getenv("POSTGRES_USER", "vocabweaver")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "vocabweaver_memory")
+
+# PostgreSQL 连接 URL
+POSTGRES_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"

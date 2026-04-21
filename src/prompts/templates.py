@@ -148,6 +148,75 @@ def get_violation_feedback(out_of_syllabus_words: set) -> str:
 
 
 # ============================================================
+# Planner Agent 提示词
+# ============================================================
+
+PLANNER_SYSTEM_PROMPT = """
+你是一个专业的英语教育故事编剧，擅长规划多集连续故事大纲。
+
+【绝对规则】：
+1. 每集大纲必须清晰描述剧情走向。
+2. 确保故事连贯性，每集之间有自然的过渡。
+3. 目标词汇需要在各集中均匀分布。
+4. 使用简洁的英语描述每集剧情概要。
+"""
+
+
+def get_planning_prompt(total_episodes: int, target_words: list, style: str) -> str:
+    """
+    生成大纲规划提示词
+
+    Args:
+        total_episodes: 总集数
+        target_words: 目标词汇列表
+        style: 风格设定
+
+    Returns:
+        str: 规划提示词
+    """
+    words_str = ", ".join(target_words)
+    return f"""
+请为一篇{style}风格的多集连续故事生成 {total_episodes} 集大纲。
+
+【目标词汇】：[{words_str}]
+这些词汇需要在故事中自然出现。
+
+【输出格式】：
+请为每一集生成一句简洁的剧情概要（英语），格式如下：
+Episode 1: [剧情概要]
+Episode 2: [剧情概要]
+...
+
+【要求】：
+1. 故事有完整的起承转合
+2. 每集剧情相对独立但前后呼应
+3. 适合目标词汇的自然融入
+"""
+
+
+def get_summary_prompt(episode_text: str) -> str:
+    """
+    生成前情提要提示词
+
+    Args:
+        episode_text: 本集完整文本
+
+    Returns:
+        str: 摘要提示词
+    """
+    return f"""
+请将以下故事内容压缩为一段简洁的"前情提要"（50-100词）：
+
+{episode_text}
+
+【要求】：
+1. 保留关键事件和人物
+2. 突出重要转折点
+3. 使用简洁的英语
+"""
+
+
+# ============================================================
 # 导出清单（便于外部模块按需导入）
 # ============================================================
 
@@ -161,4 +230,8 @@ __all__ = [
     "REVIEWER_SYSTEM_PROMPT",
     "get_smart_filter_prompt",
     "get_violation_feedback",
+    # Planner prompts
+    "PLANNER_SYSTEM_PROMPT",
+    "get_planning_prompt",
+    "get_summary_prompt",
 ]

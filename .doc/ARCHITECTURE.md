@@ -1,76 +1,278 @@
-# VocabWeaver 项目架构与实现指南 (扩展版)
+# VocabWeaver 项目架构与实现指南
+
+> **文档结构说明**：本文档采用渐进式披露原则，Phase 级别的技术细节存放于 `phases/` 子目录，按需查阅。
+
+---
 
 ## 1. 项目目标 (Project Goals)
-* 基于 Writer-Reviewer 架构，解决 LLM 生成过程中的“考研词汇负面约束”问题。
+
+* 基于 Writer-Reviewer 架构，解决 LLM 生成过程中的"考研词汇负面约束"问题。
 * 实现风格化多集连续故事生成，确保世界观、人物设定与词汇覆盖率的高度一致性。
 
+---
+
 ## 2. 核心架构设计 (Architecture Design)
-升级为“四核驱动” Agent 框架。为了最大化控制力和可追溯性，**全系统由 LangGraph 作为中枢神经进行编排**：
-* **Planner Agent (统筹编剧)**：生成 10 集大纲，将目标词汇科学分配至各章节。
-* **Writer Agent (主笔)**：挂载 Style-RAG，吸收特定风格片段，负责正文生成。
-* **Reviewer Agent (合规审查)**：执行“负面约束”校验，识别超纲词并标注。
-* **Memory Agent (记忆管家)**：维护显式状态机，执行上下文动态压缩，管理“故事圣经”。
 
-### 2.1 LangGraph 核心工作流 (Workflow Orchestration)
-本项目的核心难点在于“审查与重写”以及“长线上下文传递”，这些将完全映射到 LangGraph 的流转机制中：
-* **全局状态 (Global State)**：定义一个极其严格的 `TypedDict` 或 `Pydantic` Schema，包含 `current_episode` (当前集数), `draft_text` (草稿正文), `review_feedback` (审查意见), `retry_count` (重试次数) 等变量。这构成了 Agent 之间共享的“短期工作记忆”。
-* **节点 (Nodes)**：四大 Agent 分别映射为 LangGraph 中的四个核心 Node。
-* **条件边 (Conditional Edges)**：
-  * **对抗生成循环**：`Writer Node` -> `Reviewer Node`。如果在 Reviewer 节点发现超纲词，触发条件边**打回 (Route Back)** 给 `Writer Node`；如果合规，则流转至 `Memory Node`。
-  * **长线连载循环**：`Memory Node` -> 更新本地 JSON -> 触发条件边进入下一集 (回到 `Planner Node` 或 `Writer Node`)。
+### 2.1 Agent 角色
 
-## 3. 技术栈选型 (Tech Stack)
-* **框架**：LangGraph (利用其 State 机制实现 Agent 间的强一致性流转，利用 Conditional Edges 处理对抗生成循环)。
-* **记忆层**：放弃 Mem0/Zep 等黑盒向量记忆，采用“显式状态 JSON + 动态滑动摘要”架构。
-* **风格化 RAG**：DSPy (优化 Few-shot) + Milvus (存储经过词汇过滤的大师文风片段)。
+| Agent | 职责 |
+|-------|------|
+| **Planner** | 生成多集大纲，分配目标词汇 |
+| **Writer** | 挂载 Style-RAG，生成正文 |
+| **Reviewer** | 词汇校验 + 兜底机制 |
+| **Memory** | 状态持久化 + 断点续写 |
 
-## 4. 深度记忆管理策略 (Memory Management Strategy)
-为了保证长线叙事不“穿帮”且不违反词汇约束，系统采用三层记忆过滤机制：
+### 2.2 用户输入设计
 
-### A. 静态层：故事圣经 (Story Bible - The "CLAUDE.md" Pattern)
-* **内容**：存储核心设定、人物关系表、已使用的目标词汇、考研词汇白名单。
-* **机制**：作为 invariant（不可变量）永远挂载在所有 Agent 提示词的最顶部。
-* **作用**：确保第 10 集的主角性格与第 1 集完全一致，且 Agent 永远知道哪些词是“禁区”。
+| 模式 | 输入字段 | 触发场景 |
+|------|----------|----------|
+| **Initialize** | `total_episodes`, `target_words[]`, `user_id`, `style` | 首次创建故事 |
+| **Continue** | `target_words[]`, `user_id`, `session_id` | 续写下一集 |
 
-### B. 事实层：显式状态机 (Explicit State Machine)
-* **实现**：设计独立的状态管理组件，将剧情关键节点抽象并存储为本地 JSON 文件，确保状态流转清晰可查。
-* **管理内容**：
-  * `Character_States.json`：记录人物位置、持有道具、好感度。
-  * `Vocabulary_Progress.json`：记录每个目标词汇的出现次数及上下文。
-* **同步机制**：当 LangGraph 流转至 Memory Node 时，必须调用 `update_state` 工具，强制更新 JSON 文件。下一章生成时，Planner Node 会先读取该文件以确定起始条件。
+### 2.3 Graph 流程图
 
-### C. 动态层：三级上下文压缩 (Context Compaction Pipeline)
-为了防止长线对话导致模型注意力涣散（Lost in the middle），引入以下压缩策略：
-1. **微压缩 (Micro-compact)**：在 LangGraph 的 `Writer <-> Reviewer` 循环中，仅在 State 中保留最近 3 轮的纠错记录。对于被驳回的包含“超纲词”的旧文本，自动替换为占位符 `[Error: Content rejected due to out-of-syllabus words]`。
-2. **自动折叠 (Auto-compact)**：当单集生成的 Token 超过阈值时，在 LangGraph 中触发 `Compact Node`。
-   * **摘要生成**：LLM 将前序剧情压缩为“前情提要”，包含：1) 已发生的关键事件，2) 待解决的伏笔，3) 必须继承的语气特征。
-   * **冷备份**：将完整的逐字稿保存至 `.transcripts/` 目录供人工追溯。
-3. **身份重注 (Identity Re-injection)**：在上下文被剧烈压缩后，系统会在下一轮 Prompt 中强行注入身份确认信息，防止模型因记忆断层而改变叙事口吻。
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          VocabWeaver LangGraph 流程 v2.1                         │
+└─────────────────────────────────────────────────────────────────────────────────┘
 
-## 5. 实施路径 (Implementation Phases)
-* [x] **Phase 1**: 搭建基础项目骨架与 LangGraph 状态定义。
-  * 确立项目目录结构。
-  * **[核心]** 在 `state.py` 中定义 LangGraph 的全局 `GraphState` (TypedDict)，明确流转所需的所有变量及其 Reducer 逻辑。
-* [ ] **Phase 2**: 数据源头清洗与重新灌库 (Data Cleansing & Re-ingestion)。
-  * 建立 `scripts/data_ingestion/` 独立基础流水线。
-  * **强制词汇审查 (Pre-filtering)**：实现校验脚本，替换包含超纲词的风格片段，确保语料池绝对纯净。
-  * **元数据打标**：为切块数据打上强类型的标量标签（如 `genre: suspense`）。
-  * **向量建库**：将处理好的数据灌入 Milvus，并建立混合索引。
-* [ ] **Phase 3**: 实现 Reviewer Agent 逻辑。
-  * 集成考研词汇词典，实现正则/语义双重过滤。
-  * 定义其在 LangGraph 中的输出格式：返回布尔值 `is_valid` 及 `feedback_list`，直接写入 GraphState。
-* [ ] **Phase 4**: 搭建 Style-RAG 与 Writer Agent。
-  * 使用 DSPy 优化文风，确保检索出的示例不含超纲词。
-  * 组装 Writer Node：读取 GraphState 中的大纲与反馈，调用大模型生成正文，并更新 GraphState。
-* [ ] **Phase 5**: 构建 Memory Agent 与持久化状态机。
-  * 实现 Memory Node：负责从 GraphState 提取剧情增量，更新 `characters.json` 等静态文件。
-  * 实现 `ContextCompactor` 逻辑，处理 Token 水位。
-* [ ] **Phase 6**: LangGraph 全链路串联与长线叙事压力测试。
-  * 组装 Graph：将前几阶段编写的独立函数封装为 LangGraph 的 Nodes。
-  * 定义 Edges：编写核心路由逻辑 `route_after_review`，依据 `GraphState["is_valid"]` 决定是回到 Writer Node 还是进入 Memory Node。
-  * 编译并运行图，进行多集连载测试。
+                              ┌─────────────┐
+                              │   START     │
+                              └──────┬──────┘
+                                     │
+                     ┌───────────────┴───────────────┐
+                     │                               │
+              Initialize Mode                 Continue Mode
+                     │                               │
+                     ▼                               ▼
+          ┌──────────────────┐          ┌──────────────────┐
+          │ Initialize Node  │          │ Load Memory Node │
+          └────────┬─────────┘          └────────┬─────────┘
+                   │                             │
+                   └──────────┬──────────────────┘
+                              │
+                              ▼
+                   ┌────────────────────┐
+                   │   Planner Node     │
+                   └──────────┬─────────┘
+                              │
+                              ▼
+                   ┌────────────────────┐
+                   │   Writer Node      │◄─────────────────┐
+                   └──────────┬─────────┘                  │
+                              │                            │
+                              ▼                            │
+                   ┌────────────────────┐                  │
+                   │  Reviewer Node     │                  │
+                   └──────────┬─────────┘                  │
+                              │                            │
+                    ┌─────────┴─────────┐                  │
+                    │                   │                  │
+               is_valid=True      is_valid=False           │
+                    │                   │                  │
+                    │                   ├──── retry < 5 ───┘
+                    │                   │
+                    │                   └─ retry ≥ 5 → Fallback
+                    │                              │
+                    │                              ├─ ratio ≤ 5% → Annotate & Pass
+                    │                              ├─ adjust < 2 → Planner Adjust
+                    │                              └─ adjust ≥ 2 → Force Annotate
+                    │
+                    ▼
+          ┌──────────────────────┐
+          │    Memory Node       │
+          │ (PostgreSQL 持久化)  │
+          └──────────┬───────────┘
+                     │
+            ┌────────┴────────┐
+            │                 │
+     episode < total     episode ≥ total
+            │                 │
+            ▼                 ▼
+     ┌────────────┐     ┌──────────┐
+     │  WAITING   │     │   END    │
+     │ (断点续写) │     └──────────┘
+     └────────────┘
+            │
+            │ 用户再次输入
+            │
+            └──────────► [Load Memory Node]
+```
 
-## 6. 避坑与约束 (Constraints & Anti-patterns)
-* **严禁词汇污染**：RAG 检索回来的文风片段（Few-shot）必须经过 Reviewer 同款词典过滤。如果 Few-shot 里含有高级词汇，Writer 会产生“模仿幻觉”，从而不断产生超纲词。
-* **禁止依赖 LLM 维护状态**：绝不要问 LLM “主角现在手里有什么”，必须让 Memory Node 显式读取 `read_state_json` 并注入到 GraphState 中。
-* **限制重试死循环**：在 LangGraph 的 `GraphState` 中必须设置 `retry_count` 字段。如果 Writer 和 Reviewer 的循环超过 5 次，必须强制跳出循环，由 Planner 降低词汇密度要求或抛出异常，防止 Token 消耗失控。
+### 2.4 条件边路由逻辑
+
+```python
+def route_after_reviewer(state: GraphState) -> str:
+    if state["is_valid"]:
+        return "memory"
+    
+    if state["retry_count"] >= MAX_RETRIES:
+        if state["out_of_scope_ratio"] <= 0.05:
+            return "annotate_and_pass"
+        if state["adjust_count"] >= MAX_ADJUSTS:
+            return "force_annotate"
+        return "planner_adjust"
+    
+    return "writer"
+```
+
+### 2.5 兜底机制
+
+| 触发条件 | 分支 | 处理方式 |
+|----------|------|----------|
+| `retry >= 5` 且 `ratio <= 5%` | Annotate & Pass | 标注中文释义后通过 |
+| `retry >= 5` 且 `ratio > 5%` 且 `adjust < 2` | Planner Adjust | 降密度重试 |
+| `retry >= 5` 且 `adjust >= 2` | Force Annotate | 强制标注通过 |
+
+---
+
+## 3. GraphState 定义
+
+```python
+class GraphState(TypedDict):
+    # 用户标识
+    user_id: str
+    session_id: str
+    
+    # 剧情控制
+    total_episodes: int
+    current_episode: int
+    style: str
+    
+    # 大纲与词汇
+    outline: List[str]
+    target_words: List[str]
+    used_words: List[str]
+    
+    # 生成内容
+    draft_text: str
+    final_text: str
+    
+    # 审查结果
+    is_valid: bool
+    feedback_list: List[str]
+    out_of_scope_words: List[str]
+    out_of_scope_ratio: float
+    
+    # 流程控制
+    retry_count: int
+    adjust_count: int
+    fallback_mode: bool
+    
+    # 记忆管理
+    story_bible: dict
+    previous_summary: str
+```
+
+---
+
+## 4. 技术栈选型
+
+| 层级 | 技术选型 | 说明 |
+|------|----------|------|
+| 框架 | LangGraph | State 机制 + Conditional Edges |
+| 向量数据库 | Milvus | HNSW + Trie 混合索引 |
+| 关系数据库 | PostgreSQL | 记忆持久化，支持高并发 |
+| LLM | DashScope (Qwen) | OpenAI 兼容接口 |
+| Embedding | BGE-M3 / DashScope | 1024 维向量 |
+
+---
+
+## 5. 基础设施
+
+### 5.1 服务架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Docker Compose                     │
+├─────────────────────────────────────────────────────┤
+│                                                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │   Milvus    │  │  PostgreSQL │  │  (Optional) │ │
+│  │  :19530     │  │   :5432     │  │  Redis      │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘ │
+│                                                      │
+└─────────────────────────────────────────────────────┘
+```
+
+### 5.2 数据库 Schema 概览
+
+| 表名 | 用途 | 主键 |
+|------|------|------|
+| `sessions` | 会话元信息 | `user_id + session_id` |
+| `story_bibles` | 故事圣经 | `session_id` |
+| `episode_states` | 集数状态快照 | `session_id + episode_num` |
+| `vocabulary_progress` | 词汇使用记录 | `session_id + word` |
+
+> 详细 Schema 定义见 [phases/phase-0-infrastructure.md](phases/phase-0-infrastructure.md)
+
+---
+
+## 6. 实施路径
+
+### 进度概览
+
+| Phase | 状态 | 文档 |
+|-------|------|------|
+| Phase 0: 基础设施部署 | ✅ 已完成 | [phase-0-infrastructure.md](phases/phase-0-infrastructure.md) |
+| Phase 1: LangGraph 骨架 | ✅ 已完成 | [phase-1-langgraph-skeleton.md](phases/phase-1-langgraph-skeleton.md) |
+| Phase 2: 数据灌库 | ✅ 已完成 | [phase-2-data-ingestion.md](phases/phase-2-data-ingestion.md) |
+| Phase 3: Agent 实现 | ✅ 已完成 | [phase-3-agents.md](phases/phase-3-agents.md) |
+| Phase 4: 全链路测试 | ✅ 已完成 | [phase-4-integration.md](phases/phase-4-integration.md) |
+
+### Phase 清单
+
+- [x] **Phase 0**: 基础设施部署
+  - Docker Compose 配置（Milvus + PostgreSQL）
+  - 数据库 Schema 初始化
+  - 环境变量配置
+
+- [x] **Phase 1**: LangGraph 状态定义与 Graph 骨架
+  - 定义 GraphState (TypedDict)
+  - 定义 Node 函数签名
+  - 定义条件边路由逻辑
+  - 编译空 Graph 验证流转
+
+- [x] **Phase 2**: 数据源头清洗与灌库
+  - Markdown 切片 + 词汇软过滤
+  - Milvus 混合索引构建
+  - Embedder 工厂模式
+
+- [x] **Phase 3**: 实现 Agent 逻辑
+  - Reviewer Agent（词汇校验 + 兜底机制）
+  - Writer Agent（Style-RAG）
+  - Planner Agent（词汇分配）
+  - Memory Agent（PostgreSQL 持久化）
+
+- [x] **Phase 4**: 全链路串联与测试
+  - Graph 组装与编译
+  - 多集连载测试
+  - 断点续写测试
+  - 兜底机制测试
+
+---
+
+## 7. 避坑与约束
+
+| 约束 | 说明 |
+|------|------|
+| **词汇污染** | RAG 检索片段必须经过词汇过滤，避免 Few-shot 污染 |
+| **状态管理** | 禁止依赖 LLM 维护状态，必须显式读写数据库 |
+| **重试保护** | `retry_count >= 5` + `adjust_count >= 2` 双重保护 |
+| **记忆隔离** | 数据库查询必须带 `user_id` + `session_id` 条件 |
+
+---
+
+## 8. 文档索引
+
+```
+.doc/
+├── ARCHITECTURE.md              # 本文档（架构概览）
+├── phases/
+│   ├── phase-0-infrastructure.md    # Phase 0 技术细节
+│   ├── phase-1-langgraph-skeleton.md # Phase 1 技术细节
+│   ├── phase-2-data-ingestion.md    # Phase 2 技术细节
+│   ├── phase-3-agents.md            # Phase 3 技术细节
+│   └── phase-4-integration.md       # Phase 4 技术细节
+└── daily-log/                   # 开发日志
+```
