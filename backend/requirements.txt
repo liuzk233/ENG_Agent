@@ -1,0 +1,11 @@
+# Backend Dependencies
+# FastAPI + WebSocket
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
+
+# 复用项目依赖（通过 sys.path 引用 src/）
+# 无需重复安装

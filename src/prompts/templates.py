@@ -34,7 +34,62 @@ FEW_SHOT_EXAMPLES = """
 """
 
 
-def get_drafting_prompt(style: str, words_str: str, reference_texts: list = None) -> str:
+# ============================================================
+# Story Extraction 提示词
+# ============================================================
+
+STORY_EXTRACTION_PROMPT = """
+你是一个故事分析专家。请分析以下故事章节，提取关键信息。
+
+【章节内容】
+{chapter_text}
+
+请严格输出以下 JSON 格式（不要包含任何其他文字）：
+{{
+    "new_characters": [
+        {{
+            "name": "角色名",
+            "role": "protagonist/antagonist/supporting",
+            "description": "一句话描述（英文）"
+        }}
+    ],
+    "new_settings": [
+        {{
+            "name": "地点名",
+            "type": "location/building/region",
+            "description": "一句话描述（英文）"
+        }}
+    ],
+    "new_items": [
+        {{
+            "name": "物品名",
+            "description": "一句话描述（英文）"
+        }}
+    ],
+    "key_events": ["事件1", "事件2"],
+    "chapter_summary": "50词以内的章节摘要（英文）"
+}}
+
+【重要规则】：
+1. 只提取首次出现的新元素，已存在的不要重复
+2. 角色名必须是专有名词（首字母大写）
+3. 如果没有新角色/地点/物品，对应数组为空 []
+4. 描述必须使用英文
+"""
+
+
+def get_story_extraction_prompt(chapter_text: str) -> str:
+    """生成故事元素提取提示词"""
+    return STORY_EXTRACTION_PROMPT.format(chapter_text=chapter_text)
+
+
+def get_drafting_prompt(
+    style: str,
+    words_str: str,
+    reference_texts: list = None,
+    story_bible: dict = None,
+    previous_summary: str = None
+) -> str:
     """
     生成初稿的用户提示词（融合 Few-Shot 与 RAG 参考语料）
 
@@ -42,11 +97,46 @@ def get_drafting_prompt(style: str, words_str: str, reference_texts: list = None
         style: 目标风格（如 "exam_paper", "科幻"）
         words_str: 目标单词字符串（逗号分隔）
         reference_texts: RAG 检索到的参考语料列表
+        story_bible: 故事设定（包含角色、场景、物品等）
+        previous_summary: 前情提要
 
     Returns:
         str: 完整的用户提示词
     """
     prompt = FEW_SHOT_EXAMPLES
+
+    # 注入故事设定
+    if story_bible:
+        prompt += "\n【故事世界设定】\n"
+
+        # 角色信息
+        characters = story_bible.get("characters", [])
+        if characters:
+            prompt += "已有角色:\n"
+            for char in characters:
+                prompt += f"  - {char.get('name', 'Unknown')} ({char.get('role', 'supporting')}): {char.get('description', '')}\n"
+
+        # 场景信息
+        settings = story_bible.get("settings", [])
+        if settings:
+            prompt += "已有场景:\n"
+            for setting in settings:
+                prompt += f"  - {setting.get('name', 'Unknown')}: {setting.get('description', '')}\n"
+
+        # 物品信息
+        items = story_bible.get("items", [])
+        if items:
+            prompt += "关键物品:\n"
+            for item in items:
+                prompt += f"  - {item.get('name', 'Unknown')}: {item.get('description', '')}\n"
+
+        if characters or settings or items:
+            prompt += "⚠️ 请保持与以上设定的一致性，新角色/场景可以引入但不要与已有设定冲突。\n"
+
+    # 注入前情提要
+    if previous_summary:
+        prompt += f"\n【前情提要】\n{previous_summary}\n"
+        prompt += "请确保新章节与前面的情节自然衔接。\n"
 
     # 动态注入 RAG 检索到的参考语料
     if reference_texts:
@@ -226,6 +316,9 @@ __all__ = [
     "FEW_SHOT_EXAMPLES",
     "get_drafting_prompt",
     "get_refining_prompt",
+    # Story extraction prompts
+    "STORY_EXTRACTION_PROMPT",
+    "get_story_extraction_prompt",
     # Reviewer prompts
     "REVIEWER_SYSTEM_PROMPT",
     "get_smart_filter_prompt",

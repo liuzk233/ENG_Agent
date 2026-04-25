@@ -136,6 +136,37 @@ class MemoryManager:
             logger.error(f"❌ 加载会话失败: {e}")
             return None
 
+    def get_session_by_id(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        通过 session_id 获取会话（不需要 user_id）
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            Optional[Dict]: 会话状态，不存在返回 None
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM sessions
+                    WHERE session_id = %s
+                """, (session_id,))
+                result = cur.fetchone()
+
+            if result:
+                logger.info(f"[Memory] 通过ID获取会话: session={session_id}")
+                return dict(result)
+            else:
+                logger.warning(f"[Memory] 会话不存在: session={session_id}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ 获取会话失败: {e}")
+            return None
+
     def update_episode(self, user_id: str, session_id: str, current_episode: int) -> bool:
         """
         更新当前集数
@@ -529,6 +560,105 @@ class MemoryManager:
         if self.conn and not self.conn.closed:
             self.conn.close()
             logger.info("[Memory] PostgreSQL 连接已关闭")
+
+    # ============================================================
+    # 列表查询
+    # ============================================================
+
+    def list_user_sessions(
+        self,
+        user_id: str,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取用户会话列表
+
+        Args:
+            user_id: 用户ID
+            limit: 返回数量限制
+            offset: 偏移量
+
+        Returns:
+            List[Dict]: 会话列表
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT session_id, user_id, status, current_episode, total_episodes, style, created_at
+                    FROM sessions
+                    WHERE user_id = %s
+                    ORDER BY updated_at DESC
+                    LIMIT %s OFFSET %s
+                """, (user_id, limit, offset))
+                results = cur.fetchall()
+
+            return [dict(row) for row in results]
+
+        except Exception as e:
+            logger.error(f"❌ 获取用户会话列表失败: {e}")
+            return []
+
+    def count_user_sessions(self, user_id: str) -> int:
+        """
+        统计用户会话数量
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            int: 会话数量
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM sessions WHERE user_id = %s
+                """, (user_id,))
+                result = cur.fetchone()
+
+            return result[0] if result else 0
+
+        except Exception as e:
+            logger.error(f"❌ 统计用户会话数量失败: {e}")
+            return 0
+
+    def list_session_episodes(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取会话的所有集数
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+
+        Returns:
+            List[Dict]: 集数列表
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT es.episode_num, es.transcript, es.target_words, es.used_words
+                    FROM episode_states es
+                    JOIN sessions s ON es.session_id = s.id
+                    WHERE s.user_id = %s AND s.session_id = %s
+                    ORDER BY es.episode_num ASC
+                """, (user_id, session_id))
+                results = cur.fetchall()
+
+            return [dict(row) for row in results]
+
+        except Exception as e:
+            logger.error(f"❌ 获取会话集数列表失败: {e}")
+            return []
 
 
 # ============================================================

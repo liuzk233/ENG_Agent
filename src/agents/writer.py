@@ -10,7 +10,15 @@ from src.prompts.templates import (
 )
 
 
-def generate_draft(llm_client, target_words: list, style: str, reference_texts: Optional[list] = None, feedback: str = None) -> str:
+def generate_draft(
+    llm_client,
+    target_words: list,
+    style: str,
+    reference_texts: Optional[list] = None,
+    feedback: str = None,
+    story_bible: dict = None,
+    previous_summary: str = None
+) -> str:
     """
     Writer Agent: 负责生成文章初稿或根据反馈修改文章。
 
@@ -19,6 +27,8 @@ def generate_draft(llm_client, target_words: list, style: str, reference_texts: 
     :param style: 文章风格 (如 "科幻", "议论文")
     :param reference_texts: RAG 检索到的参考语料（可选）
     :param feedback: 如果是重写，这里会包含 Reviewer 给出的报错信息
+    :param story_bible: 故事设定（包含角色、场景、物品等）
+    :param previous_summary: 前情提要
     :return: 生成的文章字符串
     """
     words_str = ", ".join(target_words)
@@ -29,7 +39,10 @@ def generate_draft(llm_client, target_words: list, style: str, reference_texts: 
     # 2. 根据是否带有 feedback，动态组装用户指令
     if not feedback:
         # 第一轮生成 (无报错反馈)
-        user_prompt = get_drafting_prompt(style, words_str, reference_texts)
+        user_prompt = get_drafting_prompt(
+            style, words_str, reference_texts,
+            story_bible, previous_summary
+        )
     else:
         # 第 N 轮重写 (包含 Reviewer 的报错反馈)
         user_prompt = get_refining_prompt(style, words_str, feedback)

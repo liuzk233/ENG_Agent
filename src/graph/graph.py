@@ -51,17 +51,19 @@ class ContinueInput(TypedDict):
 
 def route_entry_point(state: GraphState) -> Literal["initialize", "load_memory"]:
     """
-    根据 session_id 判断入口模式
+    根据 mode 判断入口模式
 
-    - session_id 为空 → Initialize 模式
-    - session_id 不为空 → Continue 模式
+    - mode == "continue" 且 session_id 存在 → Continue 模式（加载历史）
+    - 其他情况 → Initialize 模式（新建会话）
     """
+    mode = state.get("mode", "initialize")
     session_id = state.get("session_id", "")
-    if session_id:
+
+    if mode == "continue" and session_id:
         logger.info(f"[Entry Router] Continue 模式: session={session_id}")
         return "load_memory"
     else:
-        logger.info("[Entry Router] Initialize 模式")
+        logger.info(f"[Entry Router] Initialize 模式: session={session_id}")
         return "initialize"
 
 
@@ -277,6 +279,120 @@ def run_continue(
     result = compiled_graph.invoke(initial_state, config)
 
     return result
+
+
+# ============================================================
+# 异步流式运行 Graph
+# ============================================================
+
+async def run_initialize_stream(
+    compiled_graph=None,
+    user_id: str = "",
+    session_id: str = "",
+    total_episodes: int = 1,
+    target_words: list = None,
+    style: str = "adventure",
+):
+    """
+    Initialize 模式流式运行
+
+    Args:
+        compiled_graph: 编译后的 Graph（可选，未提供则自动编译）
+        user_id: 用户ID
+        session_id: 会话ID（前端生成，用于后续续写）
+        total_episodes: 总集数
+        target_words: 目标词汇
+        style: 风格
+
+    Yields:
+        节点事件: {node_name: node_output}
+    """
+    # 自动编译 Graph
+    if compiled_graph is None:
+        compiled_graph = compile_graph()
+
+    # 初始状态
+    initial_state = {
+        "mode": "initialize",  # 标识为新建会话模式
+        "user_id": user_id,
+        "session_id": session_id,  # 使用前端传来的 session_id
+        "total_episodes": total_episodes,
+        "current_episode": 1,
+        "style": style,
+        "outline": [],
+        "target_words": target_words or [],
+        "used_words": [],
+        "draft_text": "",
+        "final_text": "",
+        "is_valid": False,
+        "feedback_list": [],
+        "out_of_scope_words": [],
+        "out_of_scope_ratio": 0.0,
+        "retry_count": 0,
+        "adjust_count": 0,
+        "fallback_mode": False,
+        "story_bible": {},
+        "previous_summary": "",
+    }
+
+    logger.info(f"[Run Initialize Stream] user={user_id}, episodes={total_episodes}")
+
+    # 使用 astream 流式执行
+    async for event in compiled_graph.astream(initial_state):
+        yield event
+
+
+async def run_continue_stream(
+    compiled_graph=None,
+    user_id: str = "",
+    session_id: str = "",
+    target_words: list = None,
+):
+    """
+    Continue 模式流式运行
+
+    Args:
+        compiled_graph: 编译后的 Graph（可选，未提供则自动编译）
+        user_id: 用户ID
+        session_id: 会话ID
+        target_words: 目标词汇
+
+    Yields:
+        节点事件: {node_name: node_output}
+    """
+    # 自动编译 Graph
+    if compiled_graph is None:
+        compiled_graph = compile_graph()
+
+    # 初始状态
+    initial_state = {
+        "mode": "continue",  # 标识为续写模式
+        "user_id": user_id,
+        "session_id": session_id,
+        "total_episodes": 0,
+        "current_episode": 0,
+        "style": "",
+        "outline": [],
+        "target_words": target_words or [],
+        "used_words": [],
+        "draft_text": "",
+        "final_text": "",
+        "is_valid": False,
+        "feedback_list": [],
+        "out_of_scope_words": [],
+        "out_of_scope_ratio": 0.0,
+        "retry_count": 0,
+        "adjust_count": 0,
+        "fallback_mode": False,
+        "story_bible": {},
+        "previous_summary": "",
+    }
+
+    logger.info(f"[Run Continue Stream] user={user_id}, session={session_id}")
+
+    # 使用 astream 流式执行
+    async for event in compiled_graph.astream(initial_state):
+        yield event
 
 
 # ============================================================

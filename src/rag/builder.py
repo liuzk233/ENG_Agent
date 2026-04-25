@@ -24,9 +24,9 @@ from src.utils.config import (
     MILVUS_HOST, MILVUS_PORT, MILVUS_COLLECTION_NAME,
     EMBEDDING_MODEL, EMBEDDING_DIM, EMBEDDING_BACKEND
 )
-from src.data_pipeline.parsers.extractor import load_syllabus_xls
+from src.data_pipeline.parsers.extractor import load_syllabus, get_syllabus_path
 from src.agents.reviewer import check_vocabulary
-from .embedder import get_embedder
+from src.rag.embedder import get_embedder
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class MilvusKnowledgeBaseBuilder:
         milvus_host: str = None,
         milvus_port: int = None,
         collection_name: str = None,
-        syllabus_path: str = None,
+        syllabus_name: str = "kaoyan",
         embedding_model: str = None,
         embedding_dim: int = None,
         enable_pre_filter: bool = True,
@@ -121,7 +121,7 @@ class MilvusKnowledgeBaseBuilder:
             milvus_host: Milvus 服务地址
             milvus_port: Milvus 服务端口
             collection_name: Collection 名称
-            syllabus_path: 大纲词汇表路径（用于软过滤）
+            syllabus_name: 大纲词汇表名称 (kaoyan, cet4, cet6)
             embedding_model: Embedding 模型名称
             embedding_dim: 向量维度
             enable_pre_filter: 是否启用词汇预过滤
@@ -133,9 +133,9 @@ class MilvusKnowledgeBaseBuilder:
         self.embedding_dim = embedding_dim or EMBEDDING_DIM
         self.enable_pre_filter = enable_pre_filter
 
-        # 加载大纲词汇表
-        if syllabus_path and enable_pre_filter:
-            self.syllabus_set = load_syllabus_xls(syllabus_path)
+        # 加载大纲词汇表（从标准 JSON 文件）
+        if enable_pre_filter:
+            self.syllabus_set = load_syllabus(syllabus_name)
             logger.info(f"📚 已加载大纲词汇: {len(self.syllabus_set)} 词")
         else:
             self.syllabus_set = None
@@ -409,10 +409,10 @@ if __name__ == "__main__":
         help="Markdown 文件目录"
     )
     parser.add_argument(
-        "--syllabus", "-s",
+        "--syllabus-name", "-s",
         type=str,
-        required=True,
-        help="大纲词汇表路径 (.xls)"
+        default="kaoyan",
+        help="大纲词汇表名称 (kaoyan, cet4, cet6)"
     )
     parser.add_argument(
         "--host",
@@ -439,7 +439,7 @@ if __name__ == "__main__":
         milvus_host=args.host,
         milvus_port=args.port,
         collection_name=args.collection,
-        syllabus_path=args.syllabus,
+        syllabus_name=args.syllabus_name,
     )
 
     builder.build(args.input)

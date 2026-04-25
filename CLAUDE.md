@@ -17,6 +17,7 @@ This file provides guidance for Claude Code when working with code in this repos
 | Phase 2: 数据灌库 | ✅ 已完成 | Milvus 向量检索 + 词汇软过滤 |
 | Phase 3: Agent 实现 | ✅ 已完成 | Writer, Reviewer, Planner, Memory |
 | Phase 4: 全链路测试 | ✅ 已完成 | 集成测试 + 端到端测试 |
+| Phase 5: 前端交互 | ✅ 已完成 | FastAPI + React + WebSocket |
 
 ## 常用命令
 

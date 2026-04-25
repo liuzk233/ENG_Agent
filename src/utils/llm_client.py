@@ -1,5 +1,6 @@
 # 文件路径: src/utils/llm_client.py
 import time
+from typing import Generator, Optional
 from openai import OpenAI
 from .config import DASHSCOPE_API_KEY, MODEL_NAME, BASE_URL
 
@@ -31,10 +32,45 @@ class LLMClient:
                 )
                 # 提取并返回生成的文本
                 return response.choices[0].message.content
-                
+
             except Exception as e:
                 print(f"⚠️ API 请求失败 (尝试 {attempt}/{max_retries}): {e}")
                 if attempt == max_retries:
                     raise Exception(f"❌ 大模型接口调用彻底失败: {e}")
                 # 失败后等 2 秒再试，防止被服务器限流
+                time.sleep(2)
+
+    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_retries: int = 3) -> Generator[str, None, None]:
+        """
+        流式发送对话请求，逐 token 返回结果。
+
+        Yields:
+            str: 每个 token 的文本
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                # 调用千问大模型（流式模式）
+                stream = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=True,
+                )
+
+                # 逐 token 返回
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+
+                return  # 成功完成，退出重试循环
+
+            except Exception as e:
+                print(f"⚠️ API 请求失败 (尝试 {attempt}/{max_retries}): {e}")
+                if attempt == max_retries:
+                    raise Exception(f"❌ 大模型接口调用彻底失败: {e}")
                 time.sleep(2)

@@ -1,0 +1,190 @@
+# ============================================
+# VocabWeaver Docker Compose
+# ============================================
+# 服务编排：
+# - frontend: Nginx 托管 React 静态文件
+# - backend: FastAPI 服务
+# - milvus: 向量数据库
+# - etcd: Milvus 依赖
+# - minio: Milvus 依赖
+# - postgres: PostgreSQL 数据库
+# ============================================
+
+services:
+  # --------------------------------------------
+  # Frontend Service (Nginx)
+  # --------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:8000
+    container_name: vocabweaver-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - vocabweaver-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --------------------------------------------
+  # Backend Service
+  # --------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: vocabweaver-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # ---------- LLM Configuration ----------
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      # ---------- Vector Store ----------
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - VECTOR_STORE_TYPE=milvus
+      # ---------- Database ----------
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-vocabweaver}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-vocabweaver123}
+      - POSTGRES_DB=${POSTGRES_DB:-vocabweaver}
+      # ---------- Application ----------
+      - PYTHONPATH=/app/src:/app/backend
+      - DEBUG=${DEBUG:-false}
+    depends_on:
+      milvus:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - vocabweaver-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # --------------------------------------------
+  # Milvus Vector Database
+  # --------------------------------------------
+  milvus:
+    image: milvusdb/milvus:v2.4.14
+    container_name: vocabweaver-milvus
+    restart: unless-stopped
+    ports:
+      - "19530:19530"
+      - "9092:9091"
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    command: ["milvus", "run", "standalone"]
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - vocabweaver-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # --------------------------------------------
+  # Milvus Dependencies
+  # --------------------------------------------
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: vocabweaver-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd-data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - vocabweaver-network
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: vocabweaver-minio
+    restart: unless-stopped
+    environment:
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    volumes:
+      - minio-data:/minio_data
+    command: minio server /minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - vocabweaver-network
+
+  # --------------------------------------------
+  # PostgreSQL Database
+  # --------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: vocabweaver-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-vocabweaver}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-vocabweaver123}
+      - POSTGRES_DB=${POSTGRES_DB:-vocabweaver}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - vocabweaver-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vocabweaver} -d ${POSTGRES_DB:-vocabweaver}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  vocabweaver-network:
+    driver: bridge
+    name: vocabweaver-network
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  milvus-data:
+    name: vocabweaver-milvus-data
+  etcd-data:
+    name: vocabweaver-etcd-data
+  minio-data:
+    name: vocabweaver-minio-data
+  postgres-data:
+    name: vocabweaver-postgres-data

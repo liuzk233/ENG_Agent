@@ -22,8 +22,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from src.utils.config import VECTOR_STORE_TYPE
-from src.data_pipeline.parsers.extractor import load_syllabus_xls
+from src.data_pipeline.parsers.extractor import load_syllabus_json
 from src.graph.graph import compile_graph, run_initialize, run_continue
+
+# 标准 JSON 大纲文件路径
+SYLLABUS_JSON_PATH = "data/processed/dicts/kaoyan_syllabus.json"
 
 
 def main():
@@ -34,12 +37,11 @@ def main():
 
     # 1. 加载大纲词表
     print("1. 正在加载大纲词表...")
-    syllabus_path = r"D:\3_下载与相关数据\xwechat_files\wxid_31zdo0xdsmio22_fcd0\msg\file\2026-04\01.考研英语词汇正序版.xls"
-    if not os.path.exists(syllabus_path):
-        print(f"🚨 找不到大纲文件: {syllabus_path}")
+    if not os.path.exists(SYLLABUS_JSON_PATH):
+        print(f"🚨 找不到大纲文件: {SYLLABUS_JSON_PATH}")
         return
 
-    syllabus_set = load_syllabus_xls(syllabus_path)
+    syllabus_set = load_syllabus_json(SYLLABUS_JSON_PATH)
     if not syllabus_set:
         print("🚨 大纲加载失败，测试终止。")
         return

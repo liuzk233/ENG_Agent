@@ -1,7 +1,70 @@
-data
+# Dependencies
+node_modules/
+__pycache__/
 *.pyc
+.pyo
+.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+.env.local
+.env.*.local
 src/.env
-src/scratch
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+backend.log
+
+# Test outputs
 test_output.json
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright
+.playwright-cli/
+playwright-report/
+test-results/
+
+# Build outputs
+data/
+src/scratch
+*.pyc
+
+# Claude Code
 .claude/settings.local.json
+.claude/worktrees/
+.claude/skills/
+
+# Documentation
 .doc/daily-log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.temp
+
+# Screenshots and test images
+*.png
+!frontend/public/*.svg
+
+# Build outputs
+frontend/dist/

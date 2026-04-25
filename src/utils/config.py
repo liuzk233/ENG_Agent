@@ -1,11 +1,11 @@
 # 文件路径: src/utils/config.py
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# 加载项目根目录下的 .env 文件
-env_path = os.path.join(current_dir, "..", ".env")
+# 加载项目根目录下的 .env 文件（统一配置入口）
+project_root = Path(__file__).parent.parent.parent
+env_path = project_root / ".env"
 load_dotenv(dotenv_path=env_path)
 
 # 阿里云 DashScope API Key
@@ -15,8 +15,8 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 if not DASHSCOPE_API_KEY:
     raise ValueError("🚨 致命错误: 未在 .env 文件中找到 DASHSCOPE_API_KEY。请检查配置！")
 
-# 模型名称，默认使用你指定的千问最新版
-MODEL_NAME = os.getenv("MODEL_NAME", "qwen3.6-plus-2026-04-02")
+# 模型名称，默认使用 qwen3.6-flash（快速模型）
+MODEL_NAME = os.getenv("MODEL_NAME", "qwen3.6-flash")
 
 # API 请求的基础 URL (阿里云兼容 OpenAI 格式的地址)
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"

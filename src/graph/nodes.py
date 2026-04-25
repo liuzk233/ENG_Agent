@@ -11,6 +11,7 @@ Node 函数实现
 import logging
 import os
 import uuid
+import time
 from typing import Dict, Any, List
 
 from .state import GraphState, MAX_RETRIES, MAX_RATIO
@@ -25,7 +26,7 @@ from src.memory.manager import get_memory_manager
 from src.utils.llm_client import LLMClient
 from src.utils.config import DASHSCOPE_API_KEY, BASE_URL, MODEL_NAME
 from src.rag.retriever import MilvusRAGRetriever
-from src.data_pipeline.parsers.extractor import load_syllabus_xls
+from src.data_pipeline.parsers.extractor import load_syllabus
 
 logger = logging.getLogger(__name__)
 
@@ -60,24 +61,12 @@ def _get_rag_retriever() -> MilvusRAGRetriever:
 
 
 def _get_syllabus_set() -> set:
-    """加载大纲词汇表（优先 JSON，回退到 XLS）"""
+    """加载大纲词汇表（从标准 JSON 文件）"""
     global _syllabus_set
     if _syllabus_set is None:
         try:
-            # 优先从 JSON 加载
-            from src.data_pipeline.parsers.extractor import load_syllabus, get_syllabus_path
-
-            json_path = get_syllabus_path("kaoyan")
-
-            if os.path.exists(json_path):
-                from src.data_pipeline.parsers.extractor import load_syllabus_json
-                _syllabus_set = load_syllabus_json(json_path)
-                logger.info(f"[Syllabus] 从 JSON 加载词汇: {len(_syllabus_set)} 词")
-            else:
-                # 回退到 XLS
-                syllabus_path = "data/raw/syllabus/考研英语词汇表.xls"
-                _syllabus_set = load_syllabus_xls(syllabus_path)
-                logger.info(f"[Syllabus] 从 XLS 加载词汇: {len(_syllabus_set)} 词")
+            _syllabus_set = load_syllabus("kaoyan")
+            logger.info(f"[Syllabus] 加载词汇: {len(_syllabus_set)} 词")
         except Exception as e:
             logger.warning(f"[Syllabus] 加载失败: {e}")
             _syllabus_set = set()
@@ -92,7 +81,7 @@ def initialize_node(state: GraphState) -> Dict[str, Any]:
     """
     创建新会话
 
-    输入：user_id, total_episodes, style, target_words
+    输入：user_id, total_episodes, style, target_words, session_id (可选)
     输出：session_id, story_bible, retry_count=0, adjust_count=0
     """
     logger.info(f"[Initialize] 创建新会话: user={state.get('user_id')}")
@@ -102,8 +91,8 @@ def initialize_node(state: GraphState) -> Dict[str, Any]:
     target_words = state.get("target_words", [])
     style = state.get("style", "adventure")
 
-    # 生成 session_id
-    session_id = str(uuid.uuid4())
+    # 使用前端传来的 session_id，如果不存在则生成新的
+    session_id = state.get("session_id") or str(uuid.uuid4())
 
     # 初始化故事圣经
     story_bible = {
@@ -158,12 +147,30 @@ def load_memory_node(state: GraphState) -> Dict[str, Any]:
         if full_state:
             session = full_state.get("session", {})
             story_bible = full_state.get("story_bible", {})
+            last_episode_state = full_state.get("last_episode_state", {})
+            vocab_progress = full_state.get("vocabulary_progress", [])
+
+            # 获取已使用的词汇
+            used_words = []
+            if vocab_progress:
+                used_words = [vp.get("word") for vp in vocab_progress if vp.get("word")]
+
+            # 生成前情提要
+            previous_summary = ""
+            if last_episode_state:
+                last_text = last_episode_state.get("transcript", "")
+                if last_text:
+                    previous_summary = last_text[:500]  # 使用上一章的最后500字符作为摘要
+
+            logger.info(f"[Load Memory] 恢复成功: episode={session.get('current_episode')}, style={session.get('style')}")
 
             return {
                 "total_episodes": session.get("total_episodes", 1),
                 "current_episode": session.get("current_episode", 1),
                 "style": session.get("style", "adventure"),
                 "story_bible": story_bible,
+                "used_words": used_words,
+                "previous_summary": previous_summary,
                 "retry_count": 0,
                 "adjust_count": 0,
                 "fallback_mode": False,
@@ -226,15 +233,17 @@ def writer_node(state: GraphState) -> Dict[str, Any]:
     """
     生成正文
 
-    输入：outline, feedback_list, previous_summary, target_words, style
+    输入：outline, feedback_list, previous_summary, target_words, style, story_bible
     输出：draft_text
     """
+    start_time = time.time()
     current_episode = state.get("current_episode", 1)
     outline = state.get("outline", [])
     feedback_list = state.get("feedback_list", [])
     previous_summary = state.get("previous_summary", "")
     target_words = state.get("target_words", [])
     style = state.get("style", "adventure")
+    story_bible = state.get("story_bible", {})
 
     logger.info(f"[Writer] 生成正文: episode={current_episode}, feedback_count={len(feedback_list)}")
 
@@ -242,16 +251,18 @@ def writer_node(state: GraphState) -> Dict[str, Any]:
     episode_outline = outline[current_episode - 1] if outline and current_episode <= len(outline) else ""
 
     # RAG 检索参考语料
+    rag_start = time.time()
     reference_texts = []
     rag = _get_rag_retriever()
     if rag and rag.should_retrieve(target_words):
         try:
             reference_texts = rag.retrieve(target_words, style=style)
-            logger.info(f"[Writer] RAG 检索到 {len(reference_texts)} 条参考语料")
+            logger.info(f"[Writer] RAG 检索到 {len(reference_texts)} 条参考语料, 耗时: {time.time() - rag_start:.2f}s")
         except Exception as e:
             logger.warning(f"RAG 检索失败: {e}")
 
     # 调用 Writer Agent 生成正文
+    llm_start = time.time()
     llm = _get_llm_client()
     feedback = "\n".join(feedback_list) if feedback_list else None
 
@@ -262,10 +273,15 @@ def writer_node(state: GraphState) -> Dict[str, Any]:
             style=style,
             reference_texts=reference_texts,
             feedback=feedback,
+            story_bible=story_bible,
+            previous_summary=previous_summary,
         )
+        logger.info(f"[Writer] LLM 生成完成, 耗时: {time.time() - llm_start:.2f}s")
     except Exception as e:
         logger.error(f"生成正文失败: {e}")
         draft_text = f"[Error] 生成失败: {e}"
+
+    logger.info(f"[Writer] 总耗时: {time.time() - start_time:.2f}s")
 
     return {
         "draft_text": draft_text,
@@ -437,11 +453,15 @@ def memory_node(state: GraphState) -> Dict[str, Any]:
     输入：final_text, story_bible, current_episode
     输出：持久化状态, current_episode++
     """
+    from src.agents.extractor import extract_story_elements, update_story_bible
+
+    start_time = time.time()
     user_id = state.get("user_id")
     session_id = state.get("session_id")
     current_episode = state.get("current_episode", 1)
     total_episodes = state.get("total_episodes", 1)
-    final_text = state.get("final_text", "")
+    # 优先使用 final_text，否则使用 draft_text
+    final_text = state.get("final_text") or state.get("draft_text", "")
     story_bible = state.get("story_bible", {})
     target_words = state.get("target_words", [])
     used_words = state.get("used_words", [])
@@ -454,11 +474,21 @@ def memory_node(state: GraphState) -> Dict[str, Any]:
     try:
         memory = get_memory_manager()
 
-        # 更新集数
-        new_episode = current_episode + 1
-        memory.update_episode(user_id, session_id, new_episode)
+        # 提取故事元素并更新 story_bible
+        extract_start = time.time()
+        try:
+            llm = _get_llm_client()
+            extraction = extract_story_elements(llm, final_text, story_bible)
+            story_bible = update_story_bible(story_bible, extraction, current_episode)
+            logger.info(
+                f"[Memory] 提取到: {len(extraction.get('new_characters', []))} 角色, "
+                f"{len(extraction.get('new_settings', []))} 地点, "
+                f"{len(extraction.get('new_items', []))} 物品, 耗时: {time.time() - extract_start:.2f}s"
+            )
+        except Exception as e:
+            logger.warning(f"故事元素提取失败: {e}")
 
-        # 保存集数状态快照
+        # 保存集数状态快照（数据库存储已完成的章节数）
         memory.save_episode_state(
             user_id=user_id,
             session_id=session_id,
@@ -472,13 +502,11 @@ def memory_node(state: GraphState) -> Dict[str, Any]:
             used_words=new_used_words,
         )
 
-        # 更新故事圣经
-        if story_bible:
-            story_bible.setdefault("plot_points", []).append({
-                "episode": current_episode,
-                "summary": final_text[:200],
-            })
-            memory.save_story_bible(user_id, session_id, story_bible)
+        # 更新数据库中的 current_episode 为已完成的章节数
+        memory.update_episode(user_id, session_id, current_episode)
+
+        # 保存更新后的故事圣经
+        memory.save_story_bible(user_id, session_id, story_bible)
 
         # 更新词汇进度
         for word in target_words:
@@ -487,12 +515,19 @@ def memory_node(state: GraphState) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"状态持久化失败: {e}")
 
-    # 生成前情提要
-    previous_summary = f"Episode {current_episode} completed."
+    logger.info(f"[Memory] 总耗时: {time.time() - start_time:.2f}s")
+
+    # 生成前情提要（使用最新章节的摘要）
+    plot_points = story_bible.get("plot_points", [])
+    if plot_points:
+        previous_summary = plot_points[-1].get("summary", f"Episode {current_episode} completed.")
+    else:
+        previous_summary = f"Episode {current_episode} completed."
 
     return {
         "current_episode": current_episode + 1,
         "used_words": new_used_words,
         "previous_summary": previous_summary,
         "story_bible": story_bible,
+        "final_text": final_text,  # 确保 final_text 被更新
     }
