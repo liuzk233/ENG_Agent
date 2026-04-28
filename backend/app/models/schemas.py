@@ -59,6 +59,7 @@ class SessionResponse(BaseModel):
     current_episode: int = Field(default=1, description="当前集数")
     total_episodes: int = Field(default=1, description="总集数")
     style: str = Field(default="adventure", description="文章风格")
+    title: Optional[str] = Field(default=None, description="会话标题")
     final_text: Optional[str] = Field(default=None, description="最新章节内容")
     target_words: List[str] = Field(default_factory=list, description="目标词汇")
     created_at: Optional[datetime] = Field(default=None, description="创建时间")

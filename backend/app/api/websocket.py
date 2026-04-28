@@ -128,13 +128,13 @@ async def run_generation(session_id: str, payload: dict, websocket: WebSocket):
     """
     执行 LangGraph 生成流程（流式）
     """
-    user_id = payload.get("user_id", "anonymous")
-    target_words = payload.get("target_words", [])
-    style = payload.get("style", "adventure")
     # 兼容 snake_case 和 camelCase
+    user_id = payload.get("user_id") or payload.get("userId", "anonymous")
+    target_words = payload.get("target_words") or payload.get("targetWords", [])
+    style = payload.get("style", "adventure")
     total_episodes = payload.get("total_episodes") or payload.get("totalEpisodes", 1)
 
-    logger.info(f"开始生成: session={session_id}, words={target_words}, episodes={total_episodes}")
+    logger.info(f"开始生成: session={session_id}, user={user_id}, words={target_words}, episodes={total_episodes}")
 
     # 初始化状态
     initial_state = {
@@ -249,9 +249,9 @@ async def run_continue(session_id: str, payload: dict, websocket: WebSocket):
     """
     # 兼容 snake_case 和 camelCase
     target_words = payload.get("target_words") or payload.get("targetWords", [])
-    user_id = payload.get("user_id", "anonymous")
+    user_id = payload.get("user_id") or payload.get("userId", "anonymous")
 
-    logger.info(f"续写: session={session_id}, words={target_words}")
+    logger.info(f"续写: session={session_id}, user={user_id}, words={target_words}")
 
     try:
         # 导入续写流式函数

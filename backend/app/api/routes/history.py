@@ -48,6 +48,7 @@ async def get_user_sessions(user_id: str, limit: int = 10, offset: int = 0):
                     current_episode=s.get("current_episode", 1),
                     total_episodes=s.get("total_episodes", 1),
                     style=s.get("style", "adventure"),
+                    title=s.get("title"),
                     created_at=s.get("created_at"),
                 )
                 for s in sessions

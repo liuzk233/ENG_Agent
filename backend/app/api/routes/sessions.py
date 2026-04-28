@@ -1,12 +1,13 @@
 """
 会话管理 API
+Updated: 2026-04-25 - v2
 """
 
 import uuid
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.concurrency import run_in_threadpool
 
 from ...models.schemas import (
@@ -119,6 +120,7 @@ async def get_session(session_id: str):
             current_episode=current_episode,
             total_episodes=session_data.get('total_episodes', 1),
             style=session_data.get('style', 'adventure'),
+            title=session_data.get('title'),
             final_text=episode_state.get('final_text') if episode_state else None,
             target_words=episode_state.get('target_words', []) if episode_state else [],
         )
@@ -133,6 +135,41 @@ async def delete_session(session_id: str):
 
     - **session_id**: 会话标识
     """
-    # TODO: 从数据库删除会话
-    logger.info(f"删除会话: {session_id}")
-    return {"status": "deleted", "session_id": session_id}
+    from src.memory.manager import MemoryManager
+
+    manager = MemoryManager()
+    try:
+        success = manager.delete_session(session_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="删除会话失败")
+
+        logger.info(f"删除会话: {session_id}")
+        return {"status": "deleted", "session_id": session_id}
+    finally:
+        manager.close()
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session(
+    session_id: str,
+    title: Optional[str] = Query(None, description="新标题")
+):
+    """
+    更新会话
+
+    - **session_id**: 会话标识
+    - **title**: 新标题
+    """
+    from src.memory.manager import MemoryManager
+
+    manager = MemoryManager()
+    try:
+        if title:
+            success = manager.update_session_title(session_id, title)
+            if not success:
+                raise HTTPException(status_code=500, detail="更新会话失败")
+
+        logger.info(f"更新会话: {session_id}, title={title}")
+        return {"status": "updated", "session_id": session_id, "title": title}
+    finally:
+        manager.close()
