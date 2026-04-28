@@ -17,7 +17,8 @@ def generate_draft(
     reference_texts: Optional[list] = None,
     feedback: str = None,
     story_bible: dict = None,
-    previous_summary: str = None
+    previous_summary: str = None,
+    episode_outline: str = None
 ) -> str:
     """
     Writer Agent: 负责生成文章初稿或根据反馈修改文章。
@@ -29,6 +30,7 @@ def generate_draft(
     :param feedback: 如果是重写，这里会包含 Reviewer 给出的报错信息
     :param story_bible: 故事设定（包含角色、场景、物品等）
     :param previous_summary: 前情提要
+    :param episode_outline: 当前章节大纲
     :return: 生成的文章字符串
     """
     words_str = ", ".join(target_words)
@@ -41,7 +43,7 @@ def generate_draft(
         # 第一轮生成 (无报错反馈)
         user_prompt = get_drafting_prompt(
             style, words_str, reference_texts,
-            story_bible, previous_summary
+            story_bible, previous_summary, episode_outline
         )
     else:
         # 第 N 轮重写 (包含 Reviewer 的报错反馈)

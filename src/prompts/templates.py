@@ -88,7 +88,8 @@ def get_drafting_prompt(
     words_str: str,
     reference_texts: list = None,
     story_bible: dict = None,
-    previous_summary: str = None
+    previous_summary: str = None,
+    episode_outline: str = None
 ) -> str:
     """
     生成初稿的用户提示词（融合 Few-Shot 与 RAG 参考语料）
@@ -99,6 +100,7 @@ def get_drafting_prompt(
         reference_texts: RAG 检索到的参考语料列表
         story_bible: 故事设定（包含角色、场景、物品等）
         previous_summary: 前情提要
+        episode_outline: 当前章节大纲
 
     Returns:
         str: 完整的用户提示词
@@ -132,6 +134,11 @@ def get_drafting_prompt(
 
         if characters or settings or items:
             prompt += "⚠️ 请保持与以上设定的一致性，新角色/场景可以引入但不要与已有设定冲突。\n"
+
+    # 注入当前章节大纲（关键：确保故事连贯性）
+    if episode_outline:
+        prompt += f"\n【本章大纲】\n{episode_outline}\n"
+        prompt += "⚠️ 必须严格按照以上大纲编写本章内容，确保剧情走向符合规划。\n"
 
     # 注入前情提要
     if previous_summary:
@@ -252,27 +259,53 @@ PLANNER_SYSTEM_PROMPT = """
 """
 
 
-def get_planning_prompt(total_episodes: int, target_words: list, style: str) -> str:
+def get_planning_prompt(
+    total_episodes: int,
+    target_words: list,
+    style: str,
+    story_bible: dict = None,
+) -> str:
     """
-    生成大纲规划提示词
+    生成大纲规划提示词（支持故事设定注入）
 
     Args:
         total_episodes: 总集数
         target_words: 目标词汇列表
         style: 风格设定
+        story_bible: 故事设定（包含角色、场景、物品等）
 
     Returns:
         str: 规划提示词
     """
     words_str = ", ".join(target_words)
-    return f"""
-请为一篇{style}风格的多集连续故事生成 {total_episodes} 集大纲。
 
-【目标词汇】：[{words_str}]
-这些词汇需要在故事中自然出现。
+    prompt = f"请为一篇{style}风格的多集连续故事生成 {total_episodes} 集极简大纲。\n\n"
+    prompt += f"【目标词汇】：[{words_str}]\n这些词汇需要在故事中自然出现。\n\n"
 
-【输出格式】：
-请为每一集生成一句简洁的剧情概要（英语），格式如下：
+    # 注入已有设定（续写时可能已有角色）
+    if story_bible:
+        characters = story_bible.get("characters", [])
+        if characters:
+            prompt += "【已有角色】：\n"
+            for char in characters[:3]:
+                prompt += f"  - {char.get('name', 'Unknown')}: {char.get('description', '')}\n"
+            prompt += "请保持角色设定的一致性。\n\n"
+
+        settings = story_bible.get("settings", [])
+        if settings:
+            prompt += "【已有场景】：\n"
+            for setting in settings[:3]:
+                prompt += f"  - {setting.get('name', 'Unknown')}\n"
+            prompt += "可以沿用或合理扩展场景。\n\n"
+
+        plot_points = story_bible.get("plot_points", [])
+        if plot_points:
+            prompt += "【已发生剧情】：\n"
+            for pp in plot_points[-3:]:
+                prompt += f"  - 第{pp.get('episode', '?')}集: {pp.get('summary', '')}\n"
+            prompt += "新剧情应与前文自然衔接。\n\n"
+
+    prompt += """【输出格式】（每行一集，简洁英文描述）：
 Episode 1: [剧情概要]
 Episode 2: [剧情概要]
 ...
@@ -280,8 +313,9 @@ Episode 2: [剧情概要]
 【要求】：
 1. 故事有完整的起承转合
 2. 每集剧情相对独立但前后呼应
-3. 适合目标词汇的自然融入
+3. 每集概要在 50 词以内
 """
+    return prompt
 
 
 def get_summary_prompt(episode_text: str) -> str:

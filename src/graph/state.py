@@ -36,7 +36,8 @@ class GraphState(TypedDict):
     # ============================================================
     # 大纲与词汇
     # ============================================================
-    outline: List[str]                        # 各集大纲
+    outline: List[str]                        # 各集大纲（仅第一集生成）
+    episode_outline: str                      # 当前集大纲（从 outline 提取）
     target_words: List[str]                   # 当前集目标词汇
     used_words: List[str]                     # 已使用的目标词汇
 

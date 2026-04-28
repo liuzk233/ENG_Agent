@@ -106,7 +106,8 @@ def update_story_bible(
             "characters": [],
             "settings": [],
             "items": [],
-            "plot_points": []
+            "plot_points": [],
+            "outline": [],
         }
 
     # 确保 story_bible 有必要的字段
@@ -114,6 +115,7 @@ def update_story_bible(
     story_bible.setdefault("settings", [])
     story_bible.setdefault("items", [])
     story_bible.setdefault("plot_points", [])
+    story_bible.setdefault("outline", [])  # 保留大纲字段
 
     # 添加首次出场信息
     for char in extraction.get("new_characters", []):

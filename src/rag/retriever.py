@@ -18,6 +18,12 @@ from src.utils.config import (
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Style 与 RAG 调用配置
+# ============================================================
+# 只有以下风格需要调用 RAG 检索风格参考语料
+RAG_STYLES = {"webnovel", "exam_paper"}
+
 
 class MilvusRAGRetriever:
     """
@@ -239,19 +245,26 @@ class MilvusRAGRetriever:
 
         return filtered_results
 
-    def should_retrieve(self, target_words: List[str]) -> bool:
+    def should_retrieve(self, target_words: List[str], style: str = None) -> bool:
         """
         语义门控：判断是否需要执行检索
 
         Criteria:
-        - 至少 2 个目标词（多词上下文效果更好）
+        1. style 在需要 RAG 的风格列表中 (webnovel, exam_paper)
+        2. 至少 2 个目标词（多词上下文效果更好）
 
         Args:
             target_words: 目标词汇列表
+            style: 文章风格
 
         Returns:
             bool: True 表示需要检索
         """
+        # 检查风格是否需要 RAG
+        if style and style not in RAG_STYLES:
+            logger.info(f"⚡ 语义门控: 跳过检索（风格 {style} 不需要 RAG）")
+            return False
+
         if len(target_words) < 2:
             logger.info(f"⚡ 语义门控: 跳过检索（只有 {len(target_words)} 个词）")
             return False

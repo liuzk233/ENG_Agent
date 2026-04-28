@@ -39,6 +39,7 @@ class PlannerAgent:
         total_episodes: int,
         target_words: List[str],
         style: str = "adventure",
+        story_bible: dict = None,
     ) -> Tuple[List[str], List[List[str]]]:
         """
         生成大纲和词汇分配
@@ -47,6 +48,7 @@ class PlannerAgent:
             total_episodes: 总集数
             target_words: 目标词汇列表
             style: 风格设定
+            story_bible: 故事设定（包含角色、场景、物品等）
 
         Returns:
             Tuple[List[str], List[List[str]]]: (大纲列表, 每集词汇列表)
@@ -56,15 +58,14 @@ class PlannerAgent:
         # 均匀分配词汇到各集
         word_assignment = self._distribute_words(target_words, total_episodes)
 
-        # 生成大纲（骨架实现，Phase 后续可接入 LLM）
+        # 生成大纲
         if self.llm_client:
-            outline = self._generate_outline_with_llm(total_episodes, word_assignment, style)
+            outline = self._generate_outline_with_llm(
+                total_episodes, word_assignment, style, story_bible
+            )
         else:
-            # 骨架实现：生成基础大纲
-            outline = [
-                f"Episode {i+1}: {' '.join(words[:3])}..."
-                for i, words in enumerate(word_assignment)
-            ]
+            # 降级：骨架实现
+            outline = self._fallback_outline(total_episodes, word_assignment)
 
         logger.info(f"[Planner] 大纲生成完成: {len(outline)} 集")
         return outline, word_assignment
@@ -148,20 +149,76 @@ class PlannerAgent:
         total_episodes: int,
         word_assignment: List[List[str]],
         style: str,
+        story_bible: dict = None,
     ) -> List[str]:
         """
-        使用 LLM 生成大纲（骨架实现）
+        使用 LLM 生成大纲
 
         Args:
             total_episodes: 总集数
             word_assignment: 词汇分配
             style: 风格
+            story_bible: 故事设定
 
         Returns:
             List[str]: 大纲列表
         """
-        # TODO: Phase 后续实现 LLM 大纲生成
-        # 目前返回骨架实现
+        # 合并所有词汇
+        all_words = []
+        for words in word_assignment:
+            all_words.extend(words)
+
+        # 生成提示词
+        prompt = get_planning_prompt(
+            total_episodes=total_episodes,
+            target_words=all_words,
+            style=style,
+            story_bible=story_bible,
+        )
+
+        try:
+            response = self.llm_client.chat(
+                system_prompt=PLANNER_SYSTEM_PROMPT,
+                user_prompt=prompt,
+                temperature=0.7,
+            )
+
+            # 解析响应，提取各集大纲
+            outline = []
+            for line in response.strip().split('\n'):
+                line = line.strip()
+                if line.startswith('Episode'):
+                    # 提取 "Episode X: xxx" 中的 xxx
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        outline.append(parts[1].strip())
+
+            # 确保数量正确
+            while len(outline) < total_episodes:
+                outline.append("Story continues...")
+
+            logger.info(f"[Planner] LLM 生成大纲完成: {len(outline)} 集")
+            return outline[:total_episodes]
+
+        except Exception as e:
+            logger.error(f"[Planner] LLM 调用失败: {e}")
+            return self._fallback_outline(total_episodes, word_assignment)
+
+    def _fallback_outline(
+        self,
+        total_episodes: int,
+        word_assignment: List[List[str]],
+    ) -> List[str]:
+        """
+        降级方案：当 LLM 失败时使用
+
+        Args:
+            total_episodes: 总集数
+            word_assignment: 词汇分配
+
+        Returns:
+            List[str]: 骨架大纲列表
+        """
         return [
             f"Episode {i+1}: {' '.join(words[:3]) if words else 'Story continues...'}"
             for i, words in enumerate(word_assignment)
@@ -173,6 +230,7 @@ def plan_story(
     target_words: List[str],
     style: str = "adventure",
     llm_client: Optional[LLMClient] = None,
+    story_bible: dict = None,
 ) -> Tuple[List[str], List[List[str]]]:
     """
     便捷函数：生成故事大纲
@@ -182,12 +240,13 @@ def plan_story(
         target_words: 目标词汇
         style: 风格
         llm_client: LLM 客户端
+        story_bible: 故事设定
 
     Returns:
         Tuple[List[str], List[List[str]]]: (大纲列表, 每集词汇列表)
     """
     planner = PlannerAgent(llm_client)
-    return planner.generate_outline(total_episodes, target_words, style)
+    return planner.generate_outline(total_episodes, target_words, style, story_bible)
 
 
 def adjust_words(
