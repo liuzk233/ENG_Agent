@@ -193,7 +193,6 @@ src/rag/retriever.py       # RAG 检索
 | `sessions` | 会话元信息 | `user_id + session_id` |
 | `story_bibles` | 故事圣经 | `session_id` |
 | `episode_states` | 集数状态快照 | `session_id + episode_num` |
-| `vocabulary_progress` | 词汇使用记录 | `session_id + word` |
 
 ## 测试文件
 

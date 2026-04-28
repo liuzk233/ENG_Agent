@@ -60,7 +60,6 @@ class TestResumeStory:
             user_id=user_id,
             session_id=session_id,
             episode_num=1,
-            state={"target_words": ["explore"], "final_text": "Episode 1 text..."},
             transcript="Full episode 1 transcript...",
             target_words=["explore"],
             used_words=["explore"],

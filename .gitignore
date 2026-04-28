@@ -50,6 +50,11 @@ src/scratch
 .claude/settings.local.json
 .claude/worktrees/
 .claude/skills/
+.claude/plans/
+
+# Session logs
+*.txt
+!requirements.txt
 
 # Documentation
 .doc/daily-log

@@ -1,5 +1,6 @@
 """
 Memory Agent
+Updated: 2026-04-25
 
 负责：
 1. PostgreSQL 持久化
@@ -306,7 +307,6 @@ class MemoryManager:
         user_id: str,
         session_id: str,
         episode_num: int,
-        state: Dict[str, Any],
         transcript: str = "",
         target_words: List[str] = None,
         used_words: List[str] = None,
@@ -318,7 +318,6 @@ class MemoryManager:
             user_id: 用户ID
             session_id: 会话ID
             episode_num: 集数
-            state: 状态快照
             transcript: 完整文本
             target_words: 目标词汇
             used_words: 已使用词汇
@@ -345,17 +344,15 @@ class MemoryManager:
                 # 插入或更新 episode state
                 cur.execute("""
                     INSERT INTO episode_states
-                    (session_id, episode_num, state, transcript, target_words, used_words)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (session_id, episode_num, transcript, target_words, used_words)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (session_id, episode_num) DO UPDATE
-                    SET state = EXCLUDED.state,
-                        transcript = EXCLUDED.transcript,
+                    SET transcript = EXCLUDED.transcript,
                         target_words = EXCLUDED.target_words,
                         used_words = EXCLUDED.used_words
                 """, (
                     session_uuid,
                     episode_num,
-                    json.dumps(state),
                     transcript,
                     json.dumps(target_words or []),
                     json.dumps(used_words or []),
@@ -409,113 +406,6 @@ class MemoryManager:
             return None
 
     # ============================================================
-    # Vocabulary Progress 操作
-    # ============================================================
-
-    def update_vocabulary_progress(
-        self,
-        user_id: str,
-        session_id: str,
-        word: str,
-        context: str = "",
-    ) -> bool:
-        """
-        更新词汇进度
-
-        Args:
-            user_id: 用户ID
-            session_id: 会话ID
-            word: 词汇
-            context: 使用上下文
-
-        Returns:
-            bool: 是否成功
-        """
-        self._ensure_connection()
-
-        try:
-            with self.conn.cursor() as cur:
-                # 获取 session UUID
-                cur.execute("""
-                    SELECT id FROM sessions
-                    WHERE user_id = %s AND session_id = %s
-                """, (user_id, session_id))
-                result = cur.fetchone()
-
-                if not result:
-                    return False
-
-                session_uuid = result[0]
-
-                # 更新或插入词汇进度
-                cur.execute("""
-                    INSERT INTO vocabulary_progress (session_id, word, occurrence_count, contexts, last_used_at)
-                    VALUES (%s, %s, 1, %s, NOW())
-                    ON CONFLICT (session_id, word) DO UPDATE
-                    SET occurrence_count = vocabulary_progress.occurrence_count + 1,
-                        contexts = CASE
-                            WHEN vocabulary_progress.contexts IS NULL THEN %s
-                            ELSE vocabulary_progress.contexts || %s
-                        END,
-                        last_used_at = NOW()
-                """, (
-                    session_uuid,
-                    word,
-                    json.dumps([context]) if context else None,
-                    json.dumps([context]) if context else None,
-                    json.dumps([context]) if context else None,
-                ))
-
-                self.conn.commit()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ 更新词汇进度失败: {e}")
-            self.conn.rollback()
-            return False
-
-    def load_vocabulary_progress(
-        self,
-        user_id: str,
-        session_id: str,
-    ) -> Dict[str, Dict[str, Any]]:
-        """
-        加载词汇进度
-
-        Args:
-            user_id: 用户ID
-            session_id: 会话ID
-
-        Returns:
-            Dict[str, Dict]: 词汇进度字典 {word: {count, contexts, last_used}}
-        """
-        self._ensure_connection()
-
-        try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT vp.word, vp.occurrence_count, vp.contexts, vp.last_used_at
-                    FROM vocabulary_progress vp
-                    JOIN sessions s ON vp.session_id = s.id
-                    WHERE s.user_id = %s AND s.session_id = %s
-                """, (user_id, session_id))
-                results = cur.fetchall()
-
-            return {
-                row['word']: {
-                    'count': row['occurrence_count'],
-                    'contexts': row['contexts'] or [],
-                    'last_used': row['last_used_at'].isoformat() if row['last_used_at'] else None,
-                }
-                for row in results
-            }
-
-        except Exception as e:
-            logger.error(f"❌ 加载词汇进度失败: {e}")
-            return {}
-
-    # ============================================================
     # 完整状态恢复
     # ============================================================
 
@@ -545,21 +435,151 @@ class MemoryManager:
         else:
             episode_state = None
 
-        # 加载词汇进度
-        vocab_progress = self.load_vocabulary_progress(user_id, session_id)
+        # 从所有 episode_states 聚合 used_words
+        used_words = self.get_all_used_words(user_id, session_id)
 
         return {
             'session': session,
             'story_bible': story_bible,
             'last_episode_state': episode_state,
-            'vocabulary_progress': vocab_progress,
+            'used_words': used_words,
         }
+
+    def get_all_used_words(self, user_id: str, session_id: str) -> List[str]:
+        """
+        从所有 episode_states 聚合已使用的词汇
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+
+        Returns:
+            List[str]: 去重后的已使用词汇列表
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT jsonb_array_elements_text(es.used_words) as word
+                    FROM episode_states es
+                    JOIN sessions s ON es.session_id = s.id
+                    WHERE s.user_id = %s AND s.session_id = %s AND es.used_words IS NOT NULL
+                """, (user_id, session_id))
+                results = cur.fetchall()
+
+            return [row[0] for row in results if row[0]]
+
+        except Exception as e:
+            logger.error(f"❌ 获取已使用词汇失败: {e}")
+            return []
 
     def close(self):
         """关闭数据库连接"""
         if self.conn and not self.conn.closed:
             self.conn.close()
             logger.info("[Memory] PostgreSQL 连接已关闭")
+
+    # ============================================================
+    # User 操作 (占位，为后期扩展准备)
+    # ============================================================
+
+    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取用户信息
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            Optional[Dict]: 用户信息，不存在返回 None
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM users WHERE id = %s
+                """, (user_id,))
+                result = cur.fetchone()
+
+            if result:
+                return dict(result)
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ 获取用户信息失败: {e}")
+            return None
+
+    def create_user(
+        self,
+        user_id: str,
+        username: str = None,
+        email: str = None,
+        password_hash: str = None,
+        is_anonymous: bool = False,
+    ) -> bool:
+        """
+        创建用户
+
+        Args:
+            user_id: 用户ID
+            username: 用户名（可选）
+            email: 邮箱（可选）
+            password_hash: 密码哈希（可选）
+            is_anonymous: 是否为匿名用户
+
+        Returns:
+            bool: 是否成功
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (id, username, email, password_hash, is_anonymous)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (user_id, username, email, password_hash, is_anonymous))
+                self.conn.commit()
+
+            logger.info(f"[Memory] 创建用户: user={user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ 创建用户失败: {e}")
+            self.conn.rollback()
+            return False
+
+    def update_user_preferences(self, user_id: str, preferences: Dict[str, Any]) -> bool:
+        """
+        更新用户偏好设置
+
+        Args:
+            user_id: 用户ID
+            preferences: 偏好设置字典
+
+        Returns:
+            bool: 是否成功
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET preferences = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (json.dumps(preferences), user_id))
+                self.conn.commit()
+
+            logger.info(f"[Memory] 更新用户偏好: user={user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ 更新用户偏好失败: {e}")
+            self.conn.rollback()
+            return False
 
     # ============================================================
     # 列表查询
@@ -625,6 +645,62 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"❌ 统计用户会话数量失败: {e}")
             return 0
+
+    def delete_session(self, session_id: str) -> bool:
+        """
+        删除会话（级联删除关联数据）
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            bool: 是否成功
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM sessions WHERE session_id = %s
+                """, (session_id,))
+                self.conn.commit()
+
+            logger.info(f"[Memory] 删除会话: session={session_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ 删除会话失败: {e}")
+            self.conn.rollback()
+            return False
+
+    def update_session_title(self, session_id: str, title: str) -> bool:
+        """
+        更新会话标题
+
+        Args:
+            session_id: 会话ID
+            title: 新标题
+
+        Returns:
+            bool: 是否成功
+        """
+        self._ensure_connection()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE sessions SET title = %s, updated_at = NOW()
+                    WHERE session_id = %s
+                """, (title, session_id))
+                self.conn.commit()
+
+            logger.info(f"[Memory] 更新会话标题: session={session_id}, title={title}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ 更新会话标题失败: {e}")
+            self.conn.rollback()
+            return False
 
     def list_session_episodes(
         self,

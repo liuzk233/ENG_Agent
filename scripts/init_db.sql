@@ -2,6 +2,26 @@
 -- 创建所需的表结构
 
 -- ============================================================
+-- Users 表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(255) PRIMARY KEY,            -- 用户ID，兼容 'anonymous'
+    username VARCHAR(255),                  -- 用户名（可选）
+    email VARCHAR(255) UNIQUE,              -- 邮箱（可选）
+    password_hash VARCHAR(255),             -- 密码哈希（可选）
+    avatar_url VARCHAR(500),                -- 头像URL（可选）
+    preferences JSONB DEFAULT '{}',         -- 用户偏好（默认风格、语言等）
+    is_anonymous BOOLEAN DEFAULT FALSE,     -- 是否为匿名用户
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 预置匿名用户（兼容现有功能）
+INSERT INTO users (id, is_anonymous)
+VALUES ('anonymous', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
 -- Sessions 表
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sessions (
@@ -12,6 +32,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     current_episode INTEGER DEFAULT 1,
     style VARCHAR(100) DEFAULT 'adventure',
     status VARCHAR(50) DEFAULT 'active',
+    title VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(user_id, session_id)
@@ -37,7 +58,6 @@ CREATE TABLE IF NOT EXISTS episode_states (
     id SERIAL PRIMARY KEY,
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     episode_num INTEGER NOT NULL,
-    state JSONB,
     transcript TEXT,
     target_words JSONB,
     used_words JSONB,
@@ -47,27 +67,22 @@ CREATE TABLE IF NOT EXISTS episode_states (
 );
 
 -- ============================================================
--- Vocabulary Progress 表
--- ============================================================
-CREATE TABLE IF NOT EXISTS vocabulary_progress (
-    id SERIAL PRIMARY KEY,
-    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    word VARCHAR(255) NOT NULL,
-    occurrence_count INTEGER DEFAULT 1,
-    contexts JSONB,
-    last_used_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(session_id, word)
-);
-
--- ============================================================
 -- 索引
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_session ON sessions(user_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_episode_states_session ON episode_states(session_id);
-CREATE INDEX IF NOT EXISTS idx_vocab_progress_session ON vocabulary_progress(session_id);
-CREATE INDEX IF NOT EXISTS idx_vocab_progress_word ON vocabulary_progress(word);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- ============================================================
+-- 外键约束（保证数据完整性）
+-- ============================================================
+ALTER TABLE sessions
+DROP CONSTRAINT IF EXISTS fk_sessions_user;
+
+ALTER TABLE sessions
+ADD CONSTRAINT fk_sessions_user
+FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
 -- ============================================================
 -- 更新时间触发器
