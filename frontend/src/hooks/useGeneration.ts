@@ -26,6 +26,7 @@ interface UseGenerationReturn {
   continueGeneration: (targetWords: string[]) => void;
   cancelGeneration: () => void;
   resetGeneration: () => void;
+  restoreSession: (sessionId: string, totalEpisodes: number) => void;
 }
 
 export function useGeneration(options: UseGenerationOptions = {}): UseGenerationReturn {
@@ -44,7 +45,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
   const isNewSessionRef = useRef(false);
 
   const { userId, setCurrentSession, addSession } = useSessionStore();
-  const { state, startGeneration: start, updateNode, setResult, setError, reset } = useGenerationStore();
+  const { state, startGeneration: start, updateNode, setTotalEpisodes, setResult, setError, reset } = useGenerationStore();
 
   // 处理 WebSocket 消息
   const handleWebSocketMessage = useCallback((message: ServerMessage) => {
@@ -247,6 +248,21 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
     messageSentRef.current = false;
   }, [reset]);
 
+  // 恢复历史会话（用于续写）
+  const restoreSession = useCallback((existingSessionId: string, totalEpisodes: number) => {
+    console.log('[Generation] 恢复会话:', existingSessionId, 'totalEpisodes:', totalEpisodes);
+
+    // 重置状态（但不进入生成状态）
+    reset();
+    setTotalEpisodes(totalEpisodes);
+    pendingMessageRef.current = null;
+    messageSentRef.current = false;
+    isNewSessionRef.current = false;
+
+    // 设置 sessionId（触发 WebSocket 连接）
+    setSessionId(existingSessionId);
+  }, [reset, setTotalEpisodes]);
+
   return {
     isGenerating: state.isGenerating,
     isConnected,
@@ -256,5 +272,6 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
     continueGeneration,
     cancelGeneration,
     resetGeneration,
+    restoreSession,
   };
 }

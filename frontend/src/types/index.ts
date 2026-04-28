@@ -13,6 +13,7 @@ export interface Session {
   currentEpisode: number;
   totalEpisodes: number;
   style: string;
+  title?: string;
   createdAt: string;
 }
 

@@ -5,7 +5,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { PlusOutlined, MessageOutlined, MenuFoldOutlined } from '@ant-design/icons';
+import { Dropdown, Modal, Input, message } from 'antd';
+import { PlusOutlined, MessageOutlined, MenuFoldOutlined, EditOutlined, DeleteOutlined, MoreOutlined } from '@ant-design/icons';
 import { useSessionStore } from '@/stores/sessionStore';
 import type { Session } from '@/types';
 
@@ -15,9 +16,11 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ onSelectSession, onNewChat }) => {
-  const { sessions, userId } = useSessionStore();
+  const { sessions, userId, setSessions } = useSessionStore();
   const [loading, setLoading] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   // 从后端加载历史会话列表
   useEffect(() => {
@@ -36,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectSession, onNewChat }) 
             currentEpisode: s.current_episode,
             totalEpisodes: s.total_episodes,
             style: s.style,
+            title: s.title,
             createdAt: s.created_at || new Date().toISOString(),
           }));
           useSessionStore.setState({ sessions: backendSessions });
@@ -70,6 +74,141 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectSession, onNewChat }) 
     return groups;
   }, {} as Record<string, Session[]>);
 
+  // 获取会话显示名称
+  const getSessionTitle = (session: Session) => {
+    if (session.title) return session.title;
+    return `第 ${session.currentEpisode}/${session.totalEpisodes} 章`;
+  };
+
+  // 删除会话
+  const handleDeleteSession = async (session: Session) => {
+    Modal.confirm({
+      title: '删除对话',
+      content: '确定要删除这个对话吗？删除后无法恢复。',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const response = await fetch(`/api/sessions/${session.sessionId}`, {
+            method: 'DELETE',
+          });
+
+          if (response.ok) {
+            // 从列表中移除
+            const newSessions = sessions.filter(s => s.sessionId !== session.sessionId);
+            useSessionStore.setState({ sessions: newSessions });
+            message.success('对话已删除');
+          } else {
+            throw new Error('删除失败');
+          }
+        } catch (error) {
+          message.error('删除失败，请重试');
+        }
+      },
+    });
+  };
+
+  // 开始重命名
+  const handleStartRename = (session: Session) => {
+    setEditingSessionId(session.sessionId);
+    setEditingTitle(session.title || getSessionTitle(session));
+  };
+
+  // 保存重命名
+  const handleSaveRename = async (session: Session) => {
+    if (!editingTitle.trim()) {
+      setEditingSessionId(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/sessions/${session.sessionId}?title=${encodeURIComponent(editingTitle.trim())}`, {
+        method: 'PATCH',
+      });
+
+      if (response.ok) {
+        // 更新本地状态
+        const newSessions = sessions.map(s =>
+          s.sessionId === session.sessionId ? { ...s, title: editingTitle.trim() } : s
+        );
+        useSessionStore.setState({ sessions: newSessions });
+        message.success('重命名成功');
+      } else {
+        throw new Error('重命名失败');
+      }
+    } catch (error) {
+      message.error('重命名失败，请重试');
+    } finally {
+      setEditingSessionId(null);
+    }
+  };
+
+  // 会话项组件
+  const SessionItem = ({ session }: { session: Session }) => {
+    const isEditing = editingSessionId === session.sessionId;
+
+    const menuItems = [
+      {
+        key: 'rename',
+        icon: <EditOutlined />,
+        label: '重命名',
+        onClick: () => handleStartRename(session),
+      },
+      {
+        key: 'delete',
+        icon: <DeleteOutlined />,
+        label: '删除',
+        danger: true,
+        onClick: () => handleDeleteSession(session),
+      },
+    ];
+
+    if (isEditing) {
+      return (
+        <div className="px-3 py-2">
+          <Input
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onBlur={() => handleSaveRename(session)}
+            onPressEnter={() => handleSaveRename(session)}
+            autoFocus
+            className="text-sm"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div
+        onClick={() => onSelectSession?.(session)}
+        className="group px-3 py-2.5 rounded-lg hover:bg-[#F0F0F0] cursor-pointer transition-colors duration-150 flex items-center gap-2"
+      >
+        <MessageOutlined className="text-sm text-[#9B9B9B] flex-shrink-0" />
+        <span className="text-sm text-[#1A1A1A] truncate flex-1">
+          {getSessionTitle(session)}
+        </span>
+        {session.status === 'completed' && (
+          <span className="text-xs text-[#10A37F] bg-[#E8F5F0] px-1.5 py-0.5 rounded flex-shrink-0">
+            完成
+          </span>
+        )}
+        <Dropdown
+          menu={{ items: menuItems }}
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-[#E5E5E5] rounded transition-opacity focus:outline-none"
+          >
+            <MoreOutlined className="text-sm text-[#6B6B6B]" />
+          </button>
+        </Dropdown>
+      </div>
+    );
+  };
+
   if (collapsed) {
     return (
       <div className="w-[60px] h-screen bg-[#FAFAFA] border-r border-[#E5E5E5] flex flex-col items-center py-4 transition-all duration-300">
@@ -97,7 +236,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectSession, onNewChat }) 
         </button>
         <button
           onClick={() => setCollapsed(true)}
-          className="w-11 h-11 rounded-lg hover:bg-[#F0F0F0] flex items-center justify-center transition-colors focus:outline-none"
+          className="w-11 h-11 rounded-lg border border-[#E5E5E5] bg-white hover:bg-[#F5F5F5] flex items-center justify-center transition-colors focus:outline-none"
           title="收起侧边栏"
         >
           <MenuFoldOutlined className="text-lg text-[#6B6B6B]" />
@@ -121,23 +260,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectSession, onNewChat }) 
                 {date}
               </div>
               {dateSessions.map((session) => (
-                <div
-                  key={session.sessionId}
-                  onClick={() => onSelectSession?.(session)}
-                  className="group px-3 py-2.5 rounded-lg hover:bg-[#F0F0F0] cursor-pointer transition-colors duration-150"
-                >
-                  <div className="flex items-center gap-2">
-                    <MessageOutlined className="text-sm text-[#9B9B9B]" />
-                    <span className="text-sm text-[#1A1A1A] truncate flex-1">
-                      第 {session.currentEpisode}/{session.totalEpisodes} 章
-                    </span>
-                    {session.status === 'completed' && (
-                      <span className="text-xs text-[#10A37F] bg-[#E8F5F0] px-1.5 py-0.5 rounded">
-                        完成
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <SessionItem key={session.sessionId} session={session} />
               ))}
             </div>
           ))

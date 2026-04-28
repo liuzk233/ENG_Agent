@@ -165,6 +165,7 @@ interface GenerationStore {
   startGeneration: (totalEpisodes: number) => void;
   updateNode: (node: string, status: NodeStatus, data?: Partial<NodeState>) => void;
   setCurrentEpisode: (episode: number) => void;
+  setTotalEpisodes: (total: number) => void;
   setResult: (result: CompletePayload) => void;
   setError: (error: string | null) => void;
   reset: () => void;
@@ -220,6 +221,14 @@ export const useGenerationStore = create<GenerationStore>((set) => ({
       state: {
         ...store.state,
         currentEpisode: episode,
+      },
+    })),
+
+  setTotalEpisodes: (total) =>
+    set((store) => ({
+      state: {
+        ...store.state,
+        totalEpisodes: total,
       },
     })),
 

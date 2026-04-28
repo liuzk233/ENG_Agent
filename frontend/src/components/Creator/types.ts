@@ -44,6 +44,7 @@ export const STYLE_OPTIONS = [
   { value: 'fairytale', label: '治愈童话' },
   { value: 'news', label: '新闻报道' },
   { value: 'exam_paper', label: '考试范文' },
+  { value: 'webnovel', label: '网络小说' },
 ] as const;
 
 export type StyleValue = typeof STYLE_OPTIONS[number]['value'];

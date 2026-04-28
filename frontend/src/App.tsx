@@ -25,6 +25,7 @@ const App: React.FC = () => {
     startGeneration,
     continueGeneration,
     resetGeneration,
+    restoreSession,
   } = useGeneration();
 
   // 处理历史会话选择
@@ -67,7 +68,10 @@ const App: React.FC = () => {
         });
       }
 
-      // 6. 判断视图状态
+      // 6. 恢复 WebSocket 连接（关键修复）
+      restoreSession(data.session_id, data.total_episodes);
+
+      // 7. 判断视图状态
       if (data.current_episode >= data.total_episodes) {
         setViewState('completed');
       } else {
@@ -79,7 +83,7 @@ const App: React.FC = () => {
       console.error('恢复会话失败:', error);
       message.error('恢复会话失败，请重试');
     }
-  }, [setCurrentSession, setTotalEpisodes, addChapter, setViewState]);
+  }, [setCurrentSession, setTotalEpisodes, addChapter, setViewState, restoreSession]);
 
   // 处理新建对话
   const handleNewChat = useCallback(() => {
@@ -89,7 +93,7 @@ const App: React.FC = () => {
   }, [resetCreator, resetGeneration, setCurrentSession]);
 
   return (
-    <div className="min-h-screen bg-[#FFFFFF] font-[Outfit,sans-serif] flex">
+    <div className="h-screen bg-[#FFFFFF] font-[Outfit,sans-serif] flex overflow-hidden">
       {/* 侧边栏 */}
       <Sidebar
         onSelectSession={handleSelectSession}
@@ -97,12 +101,12 @@ const App: React.FC = () => {
       />
 
       {/* 主内容区域 */}
-      <div className="flex-1 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* 头部 */}
         <Header />
 
         {/* 内容 */}
-        <main className="flex-1 bg-[#FFFFFF]">
+        <main className="flex-1 bg-[#FFFFFF] overflow-y-auto">
           <Creator
             isConnected={isConnected}
             isGenerating={isGenerating}
